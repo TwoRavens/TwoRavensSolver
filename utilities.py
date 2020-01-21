@@ -5,23 +5,20 @@ from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 import numpy as np
+from datetime import datetime
 
 
 def filter_args(arguments, intersect):
     return {k: arguments[k] for k in intersect if k in arguments}
 
 
-def format_dataframe_time_index(dataframe, date=None):
+def format_dataframe_time_index(dataframe, date=None, granularity_specification=None):
     """
     Ensure dataframe index is of type pd.DatetimeIndex on the date column
     @param dataframe: arbitrarily indexed dataframe
     @param date: optional column name to turn into date index
+    @param granularity_specification: freq in d3m format
     """
-    log = []
-
-    if (date is None or dataframe.index.name == date) and isinstance(dataframe.index, pd.DatetimeIndex):
-        return format_dataframe_time_index(dataframe, date or dataframe.index.name), log
-
     if date is None:
         date = 'ravensDateIndex'
         while date in dataframe:
@@ -31,39 +28,115 @@ def format_dataframe_time_index(dataframe, date=None):
     if date in dataframe:
         try:
             dataframe[date] = pd.to_datetime(dataframe[date], infer_datetime_format=True)
-            dataframe = dataframe.set_index(date)
-            dataframe = evenly_resample_time_series(dataframe)
-            return dataframe, log
+            return resample_dataframe_time_index(
+                dataframe=dataframe,
+                date=date,
+                freq=get_freq(granularity_specification=granularity_specification))
         except ValueError:
-            log.append('date column provided, but could not be parsed')
+            pass
 
+    # if there was a spec, but no valid date column to apply it to, then ignore it
     dataframe[date] = pd.date_range('1900-1-1', periods=len(dataframe), freq='D')
-    log.append('equidistant date column added')
-    return dataframe.set_index(date).dropna(), log
+    return dataframe.set_index(date)
 
 
-def get_freq(granularity_specification=None, dates=None):
+def resample_dataframe_time_index(dataframe, date, freq=None):
+    """
+    Creates a regular time series, optionally at the specified freq
+    @param dataframe:
+    @param date:
+    @param freq:
+    @return:
+    """
+    temporal_series = dataframe[date]
+    estimated_freq = get_freq(series=temporal_series)
+
+    # fall back to linspace if data is completely irregular
+    if not estimated_freq:
+        estimated_freq = (temporal_series[-1] - temporal_series[0]) / len(dataframe)
+
+    # if time series is regular and freq happens to match
+    if pd.infer_freq(temporal_series) and approx_seconds(freq) == approx_seconds(estimated_freq):
+        return dataframe.set_index(date)
+
+    freq = freq or estimated_freq
+
+    dataframe = dataframe.set_index(date)
+    dataframe_temp = dataframe.resample(freq).mean()
+
+    numeric_columns = list(dataframe.select_dtypes(include=[np.number]).columns.values)
+    categorical_columns = [i for i in dataframe.columns.values if i not in numeric_columns]
+
+    for dropped_column in categorical_columns:
+        dataframe_temp[dropped_column] = dataframe[dropped_column]
+
+    dataframe_imputed = pd.DataFrame(ColumnTransformer(transformers=[
+        ('numeric', SimpleImputer(strategy='median'), numeric_columns),
+        ('categorical', SimpleImputer(strategy='most_frequent'), categorical_columns)
+    ]).fit_transform(dataframe_temp), index=dataframe_temp.index, columns=dataframe_temp.columns)
+
+    # no imputations on index column
+    if 'd3mIndex' in dataframe_temp:
+        dataframe_imputed['d3mIndex'] = dataframe_temp['d3mIndex']
+    return dataframe_imputed
+
+
+def get_freq(series=None, granularity_specification=None):
     """
     Infer observation frequency given d3m metadata or data
     @param granularity_specification: https://gitlab.com/datadrivendiscovery/data-supply/blob/4d67a8acee3fe5236900137a528bc48cf05731a3/schemas/datasetSchema.json#L101
-    @param dates: https://pandas.pydata.org/pandas-docs/version/0.17.0/generated/pandas.infer_freq.html
+    @param series: https://pandas.pydata.org/pandas-docs/version/0.17.0/generated/pandas.infer_freq.html
     @return: observation frequency
     """
-    if granularity_specification and 'units' in granularity_specification:
-        # https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html#offset-aliases
-        unit = {
-            "seconds": "S",
-            "minutes": "T",
-            "days": "D",
-            "weeks": "W",
-            "years": "Y",
-            "unspecified": None
-        }.get(granularity_specification['units'])
-        if unit:
-            value = granularity_specification.get('value')
-            return (str(value) if value else '') + unit
-    if dates is not None:
-        return pd.infer_freq(dates)
+    d3m_granularity_units = {
+        "seconds": "S",
+        "minutes": "T",
+        "days": "D",
+        "weeks": "W",
+        "years": "Y"
+    }
+
+    # attempt to build unit from user metadata
+    if granularity_specification and granularity_specification['units'] in d3m_granularity_units:
+        value = granularity_specification.get('value')
+        return (str(value) if value else '') + d3m_granularity_units[granularity_specification['units']]
+
+    if series is None:
+        return None
+
+    # infer frequency from every three-pair of records
+    candidate_frequencies = set()
+    for i in range(len(series) - 3):
+        candidate_frequency = pd.infer_freq(series[i:i + 3])
+        if candidate_frequency:
+            candidate_frequencies.add(candidate_frequency)
+
+    # if data has no trio of evenly spaced records
+    if not candidate_frequencies:
+        return
+
+    # sort inferred frequency by approximate time durations, select shortest
+    return sorted([(i, approx_seconds(i)) for i in candidate_frequencies], key=lambda x: x[1])[0][0]
+
+
+# otherwise take the shortest date offset
+def approx_seconds(offset):
+    """
+    Attempt to approximate the number of seconds in the duration of a DateOffset
+    @param offset: pandas DateOffset instance
+    @return: float seconds
+    """
+    if not offset:
+        return
+    offset = pd.tseries.frequencies.to_offset(offset)
+    try:
+        if offset:
+            return offset.nanos / 1E9
+    except ValueError:
+        pass
+
+    date = datetime.now()
+    return ((offset.rollback(date) - offset.rollforward(date)) * offset.n).total_seconds()
 
 
 class Dataset(object):
@@ -121,18 +194,3 @@ def preprocess(dataframe, specification):
     stimulus = preprocessor.fit_transform(stimulus)
 
     return stimulus, preprocessor
-
-
-def evenly_resample_time_series(dataframe):
-    dataframe = dataframe.resample(
-        (dataframe.index[-1] - dataframe.index[0]) / len(dataframe)
-    ).mean()
-
-    imputed = pd.DataFrame(
-        SimpleImputer(missing_values=np.nan, strategy='mean')
-            .fit_transform(dataframe))
-
-    imputed.columns = dataframe.columns
-    imputed.index = dataframe.index
-
-    return imputed

@@ -2,17 +2,17 @@ from .utilities import Dataset, preprocess
 
 from .utilities import (
     filter_args,
-    format_dataframe_time_index,
-    get_freq
+    get_freq,
+    format_dataframe_time_index
 )
 
 
 # given a pipeline json and data, return a solution
 def fit_pipeline(pipeline_specification, train_specification):
     # 1. load data
-    dataset = Dataset(train_specification['input'])
-    dataframe = dataset.get_dataframe()
-
+    dataframe = Dataset(train_specification['input']).get_dataframe()
+    time = next(iter(train_specification['problem'].get('time', [])), None)
+    dataframe = format_dataframe_time_index(dataframe, date=time)
     problem_specification = train_specification['problem']
 
     # 2. preprocess
@@ -66,25 +66,26 @@ def fit_model_ar(dataframe, model_specification, problem_specification):
     @param model_specification: {'lags': int, ...}
     @param problem_specification:
     """
-    exog = problem_specification['predictors']
-    endog = problem_specification['targets']
-    date = problem_specification.get('time')
-
-    dataframe, log = format_dataframe_time_index(dataframe, date)
+    all = problem_specification['targets'] + problem_specification['predictors']
+    date = next(iter(problem_specification.get('time', [])), None)
+    exog = [i for i in problem_specification.get('exogenous', []) if i in all]
+    endog = [i for i in all if i not in exog and i != date]
 
     if date is None:
         problem_specification['time'] = dataframe.index.name
 
-    freq = get_freq(problem_specification.get('timeGranularity'), dataframe.index)
+    freq = get_freq(
+        granularity_specification=problem_specification.get('timeGranularity'),
+        series=dataframe.index)
 
     if len(endog) == 1:
         # UPDATE: statsmodels==0.10.x
+
         from statsmodels.tsa.ar_model import AR
         model = AR(
             endog=dataframe[endog],
             dates=dataframe.index,
-            freq=freq
-        )
+            freq=freq)
         return model.fit(**filter_args(model_specification, ['start_params', 'maxlags', 'ic', 'trend']))
 
         # UPDATE: statsmodels==0.11.x
@@ -98,15 +99,12 @@ def fit_model_ar(dataframe, model_specification, problem_specification):
 
     elif len(endog) > 1:
         from statsmodels.tsa.vector_ar.var_model import VAR
-        print('freq', freq)
-        print(type(freq))
-        print(dataframe)
+
         model = VAR(
             endog=dataframe[endog],
             exog=dataframe[exog] if exog else None,
             dates=dataframe.index,
-            freq=freq
-        )
+            freq=freq)
         # VAR cannot be trained with start_params, while AR can
         return model.fit(**filter_args(model_specification, ['maxlags', 'ic', 'trend']))
 

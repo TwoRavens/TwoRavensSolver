@@ -38,9 +38,10 @@ class BaseModelWrapper(object):
         pass
 
     @abc.abstractmethod
-    def forecast(self, horizon=1):
+    def forecast(self, dataframe_history, horizon=1):
         """
         Forecasts the next observation, horizon steps ahead
+        @param dataframe_history: historical data from which to forecast from
         @param horizon: number of time steps ahead to predict
         """
         pass
@@ -88,31 +89,62 @@ class StatsModelsWrapper(BaseModelWrapper):
     def predict(self, dataframe):
         pass
 
-    def forecast(self, horizon=1):
+    def forecast(self, start, end):
+        time = next(iter(self.problem_specification.get('time', [])), None)
         if type(self.model) is ARResultsWrapper:
+            # self.model.model.endog = dataframe_history
             # standardize to dataframe
             predictions = self.model.predict(
-                start=len(self.model.model.endog),
-                end=len(self.model.model.endog) + horizon - 1)\
-                .to_frame(name=self.problem_specification['targets'][0])
+                start=max(start, self.model.model._index[self.model.model.k_ar]),
+                end=end).to_frame(name=self.problem_specification['targets'][0])
+
+            if self.model.model._index[self.model.model.k_ar] > start:
+                predictions = pd.concat([
+                    pd.DataFrame(index=pd.date_range(
+                        start, self.model.model._index[self.model.model.k_ar],
+                        freq=self.model.model._index_freq)),
+                    predictions
+                ])
             # index name is missing
-            predictions.index.name = self.problem_specification['time']
+            if time:
+                predictions.index.name = time
             return predictions
 
         if type(self.model) is VARResultsWrapper:
+            # self.model.model.endog = dataframe_history[self.problem_specification['targets']]
+            # self.model.model.exog = dataframe_history[self.problem_specification['predictors']]
+
             # poor behavior from statsmodels needs manual cleanup- https://github.com/statsmodels/statsmodels/issues/3531#issuecomment-284108566
             # y parameter is a bug, deprecated in .11
             # predictions don't provide dates; dates reconstructed based on freq
+            all = self.problem_specification['targets'] + self.problem_specification['predictors']
+            exog = [i for i in self.problem_specification.get('exogenous') if i in all]
+            endog = [i for i in all if i not in exog and i != time]
+
             predictions = pd.DataFrame(
-                data=self.model.forecast(y=self.model.y, steps=horizon),
-                columns=self.problem_specification['targets'])
+                data=self.model.model.predict(self.model.model.params, start, end),
+                columns=endog)
 
-            predictions[self.problem_specification['time']] = pd.date_range(
-                start=self.model.dates[-1] + self.model.model._index_freq,
-                freq=self.model.model._index_freq,
-                periods=horizon)
+            # predictions[self.problem_specification['time']] = pd.date_range(
+            #     start=self.model.dates[-1] + self.model.model._index_freq,
+            #     freq=self.model.model._index_freq,
+            #     periods=horizon)
 
-            return predictions.set_index(self.problem_specification['time'])
+            predictions[time] = pd.date_range(
+                start=max(start, self.model.model._index[self.model.model.k_ar]),
+                end=end,
+                freq=self.model.model._index_freq)
+
+            if self.model.model._index[self.model.model.k_ar] > start:
+                predictions = pd.concat([
+                    pd.DataFrame(index=pd.date_range(
+                        start, self.model.model._index[self.model.model.k_ar],
+                        freq=self.model.model._index_freq)),
+                    predictions
+                ])
+            if time:
+                predictions = predictions.set_index(time)
+            return predictions
 
     def refit(self, dataframe=None, data_specification=None):
         if data_specification is not None and json.dumps(data_specification) == json.dumps(self.data_specification):
@@ -130,7 +162,7 @@ class StatsModelsWrapper(BaseModelWrapper):
         self.data_specification = data_specification
 
     def save(self, solution_dir):
-        self.model.remove_data()
+        # self.model.remove_data()
         os.makedirs(solution_dir, exist_ok=True)
 
         model_filename = 'model.pickle'
@@ -170,17 +202,17 @@ class StatsModelsWrapper(BaseModelWrapper):
         model = joblib.load(model_path)
 
         # reconstruct model with data it was trained on
-        if metadata['problem_specification']['taskType'] == 'FORECASTING' and data_specification:
-            dataframe = Dataset(data_specification).get_dataframe()
-
-            exog_names = problem_specification['predictors']
-            endog_names = problem_specification['targets']
-            date_name = problem_specification.get('time')
-
-            dataframe, log = format_dataframe_time_index(dataframe, date_name)
-            model.model.endog = dataframe[endog_names]
-            if type(model) == VARResultsWrapper:
-                model.model.exog = dataframe[exog_names]
+        # if metadata['problem_specification']['taskType'] == 'FORECASTING' and data_specification:
+        #     dataframe = Dataset(data_specification).get_dataframe()
+        #
+        #     exog_names = problem_specification['predictors']
+        #     endog_names = problem_specification['targets']
+        #     date_name = problem_specification.get('time')
+        #
+        #     dataframe = format_dataframe_time_index(dataframe, date_name)
+        #     model.model.endog = dataframe[endog_names]
+        #     if type(model) == VARResultsWrapper:
+        #         model.model.exog = dataframe[exog_names]
 
         preprocess = None
         if os.path.exists(preprocess_path):
