@@ -8,21 +8,71 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 
-data_path = '/home/shoe/TwoRavens/dev_scripts/time_series_data/shampoo.csv'
+
+# data_path = '/home/shoe/TwoRavens/dev_scripts/time_series_data/shampoo.csv'
+#
+# pipeline_specification = {
+#     'preprocess': None,
+#     'model': {
+#         'strategy': 'SARIMAX'
+#     }
+# }
+#
+#
+# train_specification = {
+#     "problem": {
+#         "taskType": "FORECASTING",
+#         "predictors": [],
+#         "targets": ['Sales'],
+#         "time": ["Month"]
+#     },
+#     "input": {
+#         "name": "in-sample",
+#         "resource_uri": "file://" + data_path
+#     }
+# }
+
+
+# data_path = '/ravens_volume/test_data/TR_TS_appliance/TRAIN/dataset_TRAIN/tables/learningData.csv'
+#
+# pipeline_specification = {
+#     'preprocess': None,
+#     'model': {
+#         'strategy': 'VAR'
+#     }
+# }
+#
+#
+# train_specification = {
+#     "problem": {
+#         "taskType": "FORECASTING",
+#         "predictors": ["T1", "T2"],
+#         "targets": ['Appliances'],
+#         "time": ["date"]
+#     },
+#     "input": {
+#         "name": "in-sample",
+#         "resource_uri": "file://" + data_path
+#     }
+# }
+
+
+data_path = "/ravens_volume/test_data/185_baseball/TRAIN/dataset_TRAIN/tables/learningData.csv"
 
 pipeline_specification = {
-    'preprocess': None,
+    'preprocess': "standard",
     'model': {
-        'strategy': 'ar'
+        'strategy': 'RANDOM_FOREST'
     }
 }
 
 
 train_specification = {
     "problem": {
-        "predictors": [],
-        "targets": ['Sales'],
-        "time": ["Month"]
+        "taskType": "CLASSIFICATION",
+        "predictors": ["Games_played", "Number_seasons", 'Player'],
+        "targets": ['Hall_of_Fame'],
+        "categorical": ['Position', 'Player']
     },
     "input": {
         "name": "in-sample",
@@ -30,11 +80,18 @@ train_specification = {
     }
 }
 
-
 model = tworaven_solver.fit_pipeline(
     pipeline_specification=pipeline_specification,
     train_specification=train_specification)
 
+# end = model.model.model._index[-1]
+# start = model.model.model._index[0]
+
+# model.model.plot_forecast()
+
+# import matplotlib.pyplot as plt
+#
+# plt.show()
 #
 # dataframe = pandas.read_csv(data_path)
 # dataframe['Month'] = pandas.to_datetime(dataframe['Month'])

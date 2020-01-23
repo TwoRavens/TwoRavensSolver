@@ -1,19 +1,44 @@
 
 strategies = {
-    'FORECASTING': [
-        'ar',
-        # 'arima'
-    ],
+    'FORECASTING': {
+        'UNIVARIATE': ['AR', 'SARIMAX'],
+        'MULTIVARIATE': ['VAR']
+    },
+    'CLASSIFICATION': {
+        'BINARY': [
+            'LOGISTIC_REGRESSION'
+        ],
+        'MULTICLASS': [
+            'RANDOM_FOREST'
+        ],
+        'MULTILABEL': [
+            'RANDOM_FOREST'
+        ]
+    },
+    'REGRESSION': {
+        'UNIVARIATE': [
+            'ORDINARY_LEAST_SQUARES'
+        ]
+    }
 }
 
 
 class SearchManager(object):
-    def __init__(self, task, subtask, system_params):
-        self.task = task
-        self.subtask = subtask
+    def __init__(self, system_params, problem_specification):
+        self.problem_specification = problem_specification
         self.system_params = system_params
 
-        self.generator = iter(strategies.get(self.task, []))
+        print(problem_specification)
+        task = problem_specification['taskType']
+        subtask = problem_specification.get('taskSubtype')
+
+        # TODO: forecasting subtypes need rework
+        if problem_specification['taskType'] == 'FORECASTING':
+            variables = problem_specification['targets'] + problem_specification['predictors']
+            subtask = 'MULTIVARIATE' if len(variables) > 2 else 'UNIVARIATE'
+
+        print(subtask)
+        self.generator = iter(strategies.get(task, {}).get(subtask, []))
 
     def get_pipeline_specification(self):
         try:

@@ -171,15 +171,20 @@ def preprocess(dataframe, specification):
 
     X = specification['problem']['predictors']
     y = specification['problem']['targets'][0]
+    nominal = [i for i in specification['problem'].get('categorical', []) if i in X]
+    dataframe[nominal] = dataframe[nominal].astype(str)
 
-    categorical_features = [i for i in specification['problem']['categorical'] if i != y and i in X]
+    categorical_features = [i for i in set(nominal +
+                            list(dataframe.select_dtypes(exclude=[np.number, "bool_", "object_"]).columns.values))
+                            if i != y and i in X]
 
     categorical_transformer = Pipeline(steps=[
         ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
-        ('onehot', OneHotEncoder(handle_unknown='ignore'))
+        ('onehot', OneHotEncoder(handle_unknown='ignore', sparse=False))
     ])
 
-    numerical_features = [i for i in X if i not in categorical_features]
+    numerical_features = list(dataframe.select_dtypes(include=[np.number]))
+    numerical_features = [i for i in X if i not in categorical_features and i in numerical_features]
     numerical_transformer = Pipeline(steps=[
         ('imputer', SimpleImputer(strategy='median')),
         ('scaler', StandardScaler())
@@ -191,6 +196,6 @@ def preprocess(dataframe, specification):
     ])
 
     stimulus = dataframe[X]
-    stimulus = preprocessor.fit_transform(stimulus)
+    stimulus = list(preprocessor.fit_transform(stimulus))
 
     return stimulus, preprocessor

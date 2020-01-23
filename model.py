@@ -7,6 +7,7 @@ from tworaven_solver.fit import fit_model
 
 from statsmodels.tsa.ar_model import ARResultsWrapper
 from statsmodels.tsa.vector_ar.var_model import VARResultsWrapper
+from statsmodels.tsa.statespace.sarimax import SARIMAXResultsWrapper
 
 import json
 import os
@@ -79,8 +80,103 @@ class BaseModelWrapper(object):
 
         if metadata['library'] == 'statsmodels':
             return StatsModelsWrapper.load(solution_dir, metadata=metadata)
+        elif metadata['library'] == 'scikit-learn':
+            return SciKitLearnWrapper.load(solution_dir, metadata=metadata)
         else:
             raise ValueError(f'Unrecognized library: {metadata["library"]}')
+
+
+class SciKitLearnWrapper(BaseModelWrapper):
+    library = 'scikit-learn'
+
+    def predict(self, dataframe):
+        dataframe = dataframe[self.problem_specification['predictors']]
+        if self.preprocess:
+            dataframe = pd.DataFrame(data=self.preprocess.transform(dataframe), index=dataframe.index)
+        return pd.DataFrame(data=self.model.predict(dataframe), columns=self.problem_specification['targets'])
+
+    def predict_proba(self, dataframe):
+        dataframe = dataframe[self.problem_specification['predictors']]
+        if self.preprocess:
+            dataframe = pd.DataFrame(data=self.preprocess.transform(dataframe), index=dataframe.index)
+        return self.model.predict_proba(dataframe)
+
+    def refit(self, dataframe=None, data_specification=None):
+        if self.data_specification and json.dumps(self.data_specification) == json.dumps(data_specification):
+            return
+
+        targets = self.problem_specification['targets']
+        predictors = self.problem_specification['predictors']
+        weight = self.problem_specification['weights']
+
+        if weight and weight[0] in predictors:
+            predictors.remove(weight[0])
+
+        data_predictors = dataframe[predictors]
+        if self.preprocess:
+            data_predictors = self.preprocess.transform(data_predictors)
+            data_predictors = pd.DataFrame(data=data_predictors, index=dataframe.index)
+
+        self.model.fit(
+            X=data_predictors,
+            y=dataframe[targets[0]],
+            sample_weight=dataframe[weight[0]] if weight else None)
+
+        self.data_specification = data_specification
+
+    def forecast(self, dataframe_history, horizon=1):
+        pass
+
+    def save(self, solution_dir):
+        os.makedirs(solution_dir, exist_ok=True)
+
+        model_filename = 'model.joblib'
+        preprocess_filename = 'preprocess.joblib'
+
+        joblib.dump(self.model, os.path.join(solution_dir, model_filename))
+
+        if self.preprocess:
+            joblib.dump(self.preprocess, os.path.join(solution_dir, preprocess_filename))
+
+        metadata_path = os.path.join(solution_dir, 'solution.json')
+        with open(metadata_path, 'w') as metadata_file:
+            json.dump({
+                'library': self.library,
+                'pipeline_specification': self.pipeline_specification,
+                'problem_specification': self.problem_specification,
+                'data_specification': self.data_specification,
+                'model_filename': model_filename,
+                'preprocess_filename': preprocess_filename
+            }, metadata_file)
+
+    @staticmethod
+    def load(solution_dir, metadata=None):
+
+        if not metadata:
+            metadata_path = os.path.join(solution_dir, 'solution.json')
+            with open(metadata_path, 'r') as metadata_path:
+                metadata = json.load(metadata_path)
+
+        pipeline_specification = metadata['pipeline_specification']
+        problem_specification = metadata['problem_specification']
+        data_specification = metadata.get('data_specification')
+
+        model_path = os.path.join(solution_dir, metadata['model_filename'])
+        preprocess_path = os.path.join(solution_dir, metadata['preprocess_filename'])
+
+        model = joblib.load(model_path)
+
+        preprocess = None
+        if os.path.exists(preprocess_path):
+            preprocess = joblib.load(preprocess_path)
+
+        return SciKitLearnWrapper(
+            pipeline_specification=pipeline_specification,
+            problem_specification=problem_specification,
+            data_specification=data_specification,
+            model=model,
+            preprocess=preprocess
+        )
 
 
 class StatsModelsWrapper(BaseModelWrapper):
@@ -95,13 +191,16 @@ class StatsModelsWrapper(BaseModelWrapper):
             # self.model.model.endog = dataframe_history
             # standardize to dataframe
             predictions = self.model.predict(
+                # don't predict before autoregressive terms are populated
                 start=max(start, self.model.model._index[self.model.model.k_ar]),
-                end=end).to_frame(name=self.problem_specification['targets'][0])
+                # include the end date by offsetting end by one
+                end=end)\
+                .to_frame(name=self.problem_specification['targets'][0])
 
             if self.model.model._index[self.model.model.k_ar] > start:
                 predictions = pd.concat([
                     pd.DataFrame(index=pd.date_range(
-                        start, self.model.model._index[self.model.model.k_ar],
+                        start, self.model.model._index[self.model.model.k_ar - 1],
                         freq=self.model.model._index_freq)),
                     predictions
                 ])
@@ -116,13 +215,17 @@ class StatsModelsWrapper(BaseModelWrapper):
 
             # poor behavior from statsmodels needs manual cleanup- https://github.com/statsmodels/statsmodels/issues/3531#issuecomment-284108566
             # y parameter is a bug, deprecated in .11
-            # predictions don't provide dates; dates reconstructed based on freq
             all = self.problem_specification['targets'] + self.problem_specification['predictors']
-            exog = [i for i in self.problem_specification.get('exogenous') if i in all]
+            exog = [i for i in self.problem_specification.get('exogenous', []) if i in all]
             endog = [i for i in all if i not in exog and i != time]
 
+            start_model = min(max(start, self.model.model._index[self.model.k_ar]), self.model.model._index[-1])
+            end_model = max(start, end)
+
             predictions = pd.DataFrame(
-                data=self.model.model.predict(self.model.model.params, start, end),
+                data=self.model.model.predict(
+                    params=self.model.params,
+                    start=start_model, end=end_model),
                 columns=endog)
 
             # predictions[self.problem_specification['time']] = pd.date_range(
@@ -130,20 +233,35 @@ class StatsModelsWrapper(BaseModelWrapper):
             #     freq=self.model.model._index_freq,
             #     periods=horizon)
 
+            # predictions don't provide dates; dates reconstructed based on freq
             predictions[time] = pd.date_range(
-                start=max(start, self.model.model._index[self.model.model.k_ar]),
-                end=end,
+                start=start_model,
+                end=end_model,
                 freq=self.model.model._index_freq)
 
-            if self.model.model._index[self.model.model.k_ar] > start:
+            if start_model > start:
                 predictions = pd.concat([
                     pd.DataFrame(index=pd.date_range(
-                        start, self.model.model._index[self.model.model.k_ar],
+                        start, self.model.model._index[self.model.k_ar - 1],
                         freq=self.model.model._index_freq)),
                     predictions
                 ])
+            if start_model < start:
+                predictions = predictions[predictions[time] >= start]
+
             if time:
                 predictions = predictions.set_index(time)
+            return predictions
+
+        if type(self.model) is SARIMAXResultsWrapper:
+            all = self.problem_specification['targets'] + self.problem_specification['predictors']
+            exog = [i for i in self.problem_specification.get('exogenous', []) if i in all]
+            endog = [i for i in all if i not in exog and i != time]
+
+            predictions = pd.DataFrame(
+                data=self.model.predict(start, end),
+                columns=endog)
+            print(predictions)
             return predictions
 
     def refit(self, dataframe=None, data_specification=None):
@@ -165,8 +283,8 @@ class StatsModelsWrapper(BaseModelWrapper):
         # self.model.remove_data()
         os.makedirs(solution_dir, exist_ok=True)
 
-        model_filename = 'model.pickle'
-        preprocess_filename = 'preprocess.pickle'
+        model_filename = 'model.joblib'
+        preprocess_filename = 'preprocess.joblib'
 
         joblib.dump(self.model, os.path.join(solution_dir, model_filename))
 
