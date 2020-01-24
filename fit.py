@@ -26,16 +26,59 @@ def fit_pipeline(pipeline_specification, train_specification):
     if times and times[0] in problem_specification['predictors']:
         problem_specification['predictors'].remove(times[0])
 
-    stimulus, preprocessor = fit_preprocess(
-        dataframe[problem_specification['predictors']],
-        pipeline_specification['preprocess'],
-        train_specification)
+    if problem_specification['taskType'] == 'FORECASTING':
+        time = next(iter(problem_specification.get('time', [])), None)
 
-    dataframes = {
-        'targets': dataframe[problem_specification['targets']] if problem_specification['targets'] else None,
-        'predictors': pd.DataFrame(data=stimulus, index=dataframe.index) if problem_specification['predictors'] else None,
-        'weight': dataframe[weights[0]] if weights else None
-    }
+        # targets cannot be exogenous, subset exogenous labels to the predictor set
+        exog_names = [i for i in problem_specification.get('exogenous', []) if i in problem_specification['predictors']]
+        # target variables are not transformed, all other variables are transformed
+        endog_non_target_names = [i for i in problem_specification['predictors'] if i not in exog_names and i != time]
+        endog_target_names = [i for i in problem_specification['targets'] if i != time]
+
+        if exog_names:
+            exog, preprocess_exog = fit_preprocess(
+                dataframe[endog_non_target_names],
+                pipeline_specification['preprocess'],
+                train_specification)
+        else:
+            exog, preprocess_exog = None, None
+
+        if endog_non_target_names:
+            endog_non_target, preprocess_endog = fit_preprocess(
+                dataframe[endog_non_target_names],
+                pipeline_specification['preprocess'],
+                train_specification)
+            endog = pd.concat([
+                dataframe[endog_target_names],
+                pd.DataFrame(endog_non_target, index=dataframe.index)],
+                axis=1)
+        else:
+            endog, preprocess_endog = dataframe[endog_target_names], None
+
+        dataframes = {
+            'exogenous': exog,
+            'endogenous': endog,
+            'time': dataframe.index
+        }
+        preprocessors = {
+            'exogenous': preprocess_exog,
+            'endogenous': preprocess_endog
+        }
+    else:
+        stimulus, preprocessor = fit_preprocess(
+            dataframe[problem_specification['predictors']],
+            pipeline_specification['preprocess'],
+            train_specification)
+
+        dataframes = {
+            'targets': dataframe[problem_specification['targets']] if problem_specification['targets'] else None,
+            'predictors': stimulus if problem_specification['predictors'] else None,
+        }
+        preprocessors = {
+            'predictors': preprocessor
+        }
+
+    dataframes['weight'] = dataframe[weights[0]] if weights else None
 
     # 3. modeling
     model_specification = pipeline_specification['model']
@@ -48,7 +91,7 @@ def fit_pipeline(pipeline_specification, train_specification):
             pipeline_specification=pipeline_specification,
             problem_specification=problem_specification,
             model=model,
-            preprocess=preprocessor)
+            preprocessors=preprocessors)
 
     if model_specification['strategy'] in [
         'ORDINARY_LEAST_SQUARES', 'LOGISTIC_REGRESSION', 'RANDOM_FOREST', 'SUPPORT_VECTOR_CLASSIFIER'
@@ -57,7 +100,7 @@ def fit_pipeline(pipeline_specification, train_specification):
             pipeline_specification=pipeline_specification,
             problem_specification=problem_specification,
             model=model,
-            preprocess=preprocessor)
+            preprocessors=preprocessors)
 
 
 def fit_preprocess(dataframe, preprocess_specification, train_specification):
@@ -96,27 +139,20 @@ def fit_model_ar(dataframes, model_specification, problem_specification):
     @param problem_specification:
     """
 
-    dataframe = pd.concat(
-        [i for i in [dataframes['targets'], dataframes['predictors']] if i is not None],
-        axis=1)
+    time = next(iter(problem_specification.get('time', [])), None)
 
-    all = problem_specification['targets'] + problem_specification['predictors']
-    date = next(iter(problem_specification.get('time', [])), None)
-    exog = [i for i in problem_specification.get('exogenous', []) if i in all]
-    endog = [i for i in dataframe.columns.values if i not in exog and i != date]
-
-    if date is None:
-        problem_specification['time'] = dataframe.index.name
+    if time is None:
+        problem_specification['time'] = dataframes['time'].name
 
     freq = get_freq(
         granularity_specification=problem_specification.get('timeGranularity'),
-        series=dataframe.index)
+        series=dataframes['time'])
 
     # UPDATE: statsmodels==0.10.x
     from statsmodels.tsa.ar_model import AR
     model = AR(
-        endog=dataframe[endog],
-        dates=dataframe.index,
+        endog=dataframes['endogenous'],
+        dates=dataframes['time'],
         freq=freq)
     return model.fit(**filter_args(model_specification, ['start_params', 'maxlags', 'ic', 'trend']))
 
@@ -139,28 +175,21 @@ def fit_model_var(dataframes, model_specification, problem_specification):
     @param problem_specification:
     """
 
-    dataframe = pd.concat(
-        [i for i in [dataframes['targets'], dataframes['predictors']] if i is not None],
-        axis=1)
+    time = next(iter(problem_specification.get('time', [])), None)
 
-    all = problem_specification['targets'] + problem_specification['predictors']
-    date = next(iter(problem_specification.get('time', [])), None)
-    exog = [i for i in problem_specification.get('exogenous', []) if i in all]
-    endog = [i for i in dataframe.columns.values if i not in exog and i != date]
-
-    if date is None:
-        problem_specification['time'] = dataframe.index.name
+    if time is None:
+        problem_specification['time'] = dataframes['time'].name
 
     freq = get_freq(
         granularity_specification=problem_specification.get('timeGranularity'),
-        series=dataframe.index)
+        series=dataframes['time'])
 
     from statsmodels.tsa.vector_ar.var_model import VAR
 
     model = VAR(
-        endog=dataframe[endog],
-        exog=dataframe[exog] if exog else None,
-        dates=dataframe.index,
+        endog=dataframes['endogenous'],
+        exog=dataframes.get('exogenous'),
+        dates=dataframes['time'],
         freq=freq)
     # VAR cannot be trained with start_params, while AR can
     return model.fit(**filter_args(model_specification, ['maxlags', 'ic', 'trend']))
@@ -175,27 +204,21 @@ def fit_model_sarimax(dataframes, model_specification, problem_specification):
     @param problem_specification:
     """
 
-    dataframe = pd.concat(
-        [i for i in [dataframes['targets'], dataframes['predictors']] if i is not None],
-        axis=1)
-    all = problem_specification['targets'] + problem_specification['predictors']
-    date = next(iter(problem_specification.get('time', [])), None)
-    exog = [i for i in problem_specification.get('exogenous', []) if i in all]
-    endog = [i for i in dataframe.columns.values if i not in exog and i != date]
+    time = next(iter(problem_specification.get('time', [])), None)
 
-    if date is None:
-        problem_specification['time'] = dataframe.index.name
+    if time is None:
+        problem_specification['time'] = dataframes['time'].name
 
     freq = get_freq(
         granularity_specification=problem_specification.get('timeGranularity'),
-        series=dataframe.index)
+        series=dataframes['time'])
 
     from statsmodels.tsa.statespace.sarimax import SARIMAX
 
     model = SARIMAX(
-        endog=dataframe[endog],
-        exog=dataframe[exog] if exog else None,
-        dates=dataframe.index,
+        endog=dataframes['endogenous'],
+        exog=dataframes.get('exogenous'),
+        dates=dataframes['time'],
         freq=freq,
         **filter_args(model_specification, [
             "order", "seasonal_order", "trend", "measurement_error",

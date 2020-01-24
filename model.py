@@ -20,7 +20,7 @@ class BaseModelWrapper(object):
             pipeline_specification,
             problem_specification,
             model,
-            preprocess=None,
+            preprocessors=None,
             data_specification=None):
 
         self.pipeline_specification = pipeline_specification
@@ -28,7 +28,7 @@ class BaseModelWrapper(object):
         self.data_specification = data_specification
 
         self.model = model
-        self.preprocess = preprocess
+        self.preprocessors = preprocessors
 
     @abc.abstractmethod
     def predict(self, dataframe):
@@ -94,8 +94,10 @@ class SciKitLearnWrapper(BaseModelWrapper):
 
     def predict(self, dataframe):
         dataframe = dataframe[self.problem_specification['predictors']]
-        if self.preprocess:
-            dataframe = pd.DataFrame(data=self.preprocess.transform(dataframe), index=dataframe.index)
+        if self.preprocessors:
+            dataframe = pd.DataFrame(
+                data=self.preprocessors['predictors'].transform(dataframe),
+                index=dataframe.index)
 
         return pd.DataFrame(
             data=self.model.predict(dataframe),
@@ -104,8 +106,10 @@ class SciKitLearnWrapper(BaseModelWrapper):
 
     def predict_proba(self, dataframe):
         dataframe = dataframe[self.problem_specification['predictors']]
-        if self.preprocess:
-            dataframe = pd.DataFrame(data=self.preprocess.transform(dataframe), index=dataframe.index)
+        if self.preprocessors:
+            dataframe = pd.DataFrame(
+                data=self.preprocessors['predictors'].transform(dataframe),
+                index=dataframe.index)
         return self.model.predict_proba(dataframe)
 
     def refit(self, dataframe=None, data_specification=None):
@@ -120,9 +124,10 @@ class SciKitLearnWrapper(BaseModelWrapper):
             predictors.remove(weight[0])
 
         data_predictors = dataframe[predictors]
-        if self.preprocess:
-            data_predictors = self.preprocess.transform(data_predictors)
-            data_predictors = pd.DataFrame(data=data_predictors, index=dataframe.index)
+        if self.preprocessors:
+            data_predictors = pd.DataFrame(
+                data=self.preprocessors['predictors'].transform(data_predictors),
+                index=dataframe.index)
 
         self.model.fit(
             X=data_predictors,
@@ -138,12 +143,15 @@ class SciKitLearnWrapper(BaseModelWrapper):
         os.makedirs(solution_dir, exist_ok=True)
 
         model_filename = 'model.joblib'
-        preprocess_filename = 'preprocess.joblib'
+        preprocess_folder = 'preprocess'
 
         joblib.dump(self.model, os.path.join(solution_dir, model_filename))
 
-        if self.preprocess:
-            joblib.dump(self.preprocess, os.path.join(solution_dir, preprocess_filename))
+        if self.preprocessors:
+            preprocess_dir = os.path.join(solution_dir, preprocess_folder)
+            os.makedirs(preprocess_dir, exist_ok=True)
+            for name in self.preprocessors:
+                joblib.dump(self.preprocessors[name], os.path.join(preprocess_dir, f'{name}.joblib'))
 
         metadata_path = os.path.join(solution_dir, 'solution.json')
         with open(metadata_path, 'w') as metadata_file:
@@ -153,7 +161,7 @@ class SciKitLearnWrapper(BaseModelWrapper):
                 'problem_specification': self.problem_specification,
                 'data_specification': self.data_specification,
                 'model_filename': model_filename,
-                'preprocess_filename': preprocess_filename
+                'preprocess_folder': preprocess_folder
             }, metadata_file)
 
     @staticmethod
@@ -169,20 +177,21 @@ class SciKitLearnWrapper(BaseModelWrapper):
         data_specification = metadata.get('data_specification')
 
         model_path = os.path.join(solution_dir, metadata['model_filename'])
-        preprocess_path = os.path.join(solution_dir, metadata['preprocess_filename'])
+        preprocess_dir = os.path.join(solution_dir, metadata['preprocess_folder'])
 
         model = joblib.load(model_path)
 
-        preprocess = None
-        if os.path.exists(preprocess_path):
-            preprocess = joblib.load(preprocess_path)
+        preprocessors = {}
+        if os.path.exists(preprocess_dir):
+            for filename in os.listdir(preprocess_dir):
+                preprocessors[filename.replace('.joblib', '')] = joblib.load(os.path.join(preprocess_dir, filename))
 
         return SciKitLearnWrapper(
             pipeline_specification=pipeline_specification,
             problem_specification=problem_specification,
             data_specification=data_specification,
             model=model,
-            preprocess=preprocess
+            preprocessors=preprocessors
         )
 
 
@@ -236,14 +245,7 @@ class StatsModelsWrapper(BaseModelWrapper):
             return predictions
 
         if type(self.model) is VARResultsWrapper:
-            # self.model.model.endog = dataframe_history[self.problem_specification['targets']]
-            # self.model.model.exog = dataframe_history[self.problem_specification['predictors']]
-
-            # poor behavior from statsmodels needs manual cleanup- https://github.com/statsmodels/statsmodels/issues/3531#issuecomment-284108566
-            # y parameter is a bug, deprecated in .11
-            all = self.problem_specification['targets'] + self.problem_specification['predictors']
-            exog = [i for i in self.problem_specification.get('exogenous', []) if i in all]
-            endog = [i for i in all if i not in exog and i != time]
+            endog_target_names = [i for i in self.problem_specification['targets'] if i != time]
 
             start_model = min(max(start, self.model.model._index[self.model.k_ar]), self.model.model._index[-1])
             end_model = max(start, end)
@@ -251,13 +253,8 @@ class StatsModelsWrapper(BaseModelWrapper):
             predictions = pd.DataFrame(
                 data=self.model.model.predict(
                     params=self.model.params,
-                    start=start_model, end=end_model),
-                columns=endog)
-
-            # predictions[self.problem_specification['time']] = pd.date_range(
-            #     start=self.model.dates[-1] + self.model.model._index_freq,
-            #     freq=self.model.model._index_freq,
-            #     periods=horizon)
+                    start=start_model, end=end_model)[:, :len(endog_target_names)],
+                columns=endog_target_names)
 
             # predictions don't provide dates; dates reconstructed based on freq
             predictions[time] = pd.date_range(
@@ -281,8 +278,8 @@ class StatsModelsWrapper(BaseModelWrapper):
 
         if type(self.model) is SARIMAXResultsWrapper:
             all = self.problem_specification['targets'] + self.problem_specification['predictors']
-            exog = [i for i in self.problem_specification.get('exogenous', []) if i in all]
-            endog = [i for i in all if i not in exog and i != time]
+            exog_names = [i for i in self.problem_specification.get('exogenous', []) if i in all]
+            endog = [i for i in all if i not in exog_names and i != time]
 
             predictions = pd.DataFrame(
                 data=self.model.predict(start, end),
@@ -309,12 +306,15 @@ class StatsModelsWrapper(BaseModelWrapper):
         os.makedirs(solution_dir, exist_ok=True)
 
         model_filename = 'model.joblib'
-        preprocess_filename = 'preprocess.joblib'
+        preprocess_folder = 'preprocessors'
 
         joblib.dump(self.model, os.path.join(solution_dir, model_filename))
 
-        if self.preprocess:
-            joblib.dump(self.preprocess, os.path.join(solution_dir, preprocess_filename))
+        if self.preprocessors:
+            preprocess_dir = os.path.join(solution_dir, preprocess_folder)
+            os.makedirs(preprocess_dir, exist_ok=True)
+            for name in self.preprocessors:
+                joblib.dump(self.preprocessors[name], os.path.join(preprocess_dir, f'{name}.joblib'))
 
         metadata_path = os.path.join(solution_dir, 'solution.json')
         with open(metadata_path, 'w') as metadata_file:
@@ -324,7 +324,7 @@ class StatsModelsWrapper(BaseModelWrapper):
                 'problem_specification': self.problem_specification,
                 'data_specification': self.data_specification,
                 'model_filename': model_filename,
-                'preprocess_filename': preprocess_filename
+                'preprocess_folder': preprocess_folder
             }, metadata_file)
 
     @staticmethod
@@ -340,7 +340,7 @@ class StatsModelsWrapper(BaseModelWrapper):
         data_specification = metadata.get('data_specification')
 
         model_path = os.path.join(solution_dir, metadata['model_filename'])
-        preprocess_path = os.path.join(solution_dir, metadata['preprocess_filename'])
+        preprocess_dir = os.path.join(solution_dir, metadata['preprocess_folder'])
 
         model = joblib.load(model_path)
 
@@ -357,14 +357,15 @@ class StatsModelsWrapper(BaseModelWrapper):
         #     if type(model) == VARResultsWrapper:
         #         model.model.exog = dataframe[exog_names]
 
-        preprocess = None
-        if os.path.exists(preprocess_path):
-            preprocess = joblib.load(preprocess_path)
+        preprocessors = {}
+        if os.path.exists(preprocess_dir):
+            for filename in os.listdir(preprocess_dir):
+                preprocessors[filename.replace('.joblib', '')] = joblib.load(os.path.join(preprocess_dir, filename))
 
         return StatsModelsWrapper(
             pipeline_specification=pipeline_specification,
             problem_specification=problem_specification,
             data_specification=data_specification,
             model=model,
-            preprocess=preprocess
+            preprocessors=preprocessors
         )
