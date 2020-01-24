@@ -1,23 +1,61 @@
 
 strategies = {
     'FORECASTING': {
-        'UNIVARIATE': ['AR', 'SARIMAX'],
-        'MULTIVARIATE': ['VAR']
+        'UNIVARIATE': [
+            {
+                'strategy': 'AR',
+            },
+            *[
+                {
+                    'strategy': 'SARIMAX',
+                    'order': order,
+                }
+                for order in [(1, 0, 0), (1, 1, 1), (4, 1, 2), (2, 1, 0)]
+            ]
+        ],
+        'MULTIVARIATE': [
+            {
+                'strategy': 'VAR'
+            }
+        ]
     },
     'CLASSIFICATION': {
         'BINARY': [
-            'LOGISTIC_REGRESSION'
+            {
+                'strategy': 'LOGISTIC_REGRESSION'
+            },
+            {
+                'strategy': 'SUPPORT_VECTOR_CLASSIFIER'
+            }
         ],
         'MULTICLASS': [
-            'RANDOM_FOREST'
+            *[
+                {
+                    'strategy': 'RANDOM_FOREST',
+                    'n_estimators': n_estimators
+                } for n_estimators in [10, 100]
+            ],
+            {
+                'strategy': 'SUPPORT_VECTOR_CLASSIFIER'
+            }
         ],
         'MULTILABEL': [
-            'RANDOM_FOREST'
+            *[
+                {
+                    'strategy': 'RANDOM_FOREST',
+                    'n_estimators': n_estimators
+                } for n_estimators in [10, 100]
+            ],
+            {
+                'strategy': 'SUPPORT_VECTOR_CLASSIFIER'
+            }
         ]
     },
     'REGRESSION': {
         'UNIVARIATE': [
-            'ORDINARY_LEAST_SQUARES'
+            {
+                'strategy': 'ORDINARY_LEAST_SQUARES'
+            }
         ]
     }
 }
@@ -42,16 +80,13 @@ class SearchManager(object):
 
     def get_pipeline_specification(self):
         try:
-            strategy = next(self.generator)
+            model_specification = next(self.generator)
         except StopIteration:
             return
 
         return {
             'preprocess': None,
-            'model': {
-                'strategy': strategy,
-                **self.system_params.get(strategy, {})
-            }
+            'model': model_specification
         }
 
     def metalearn_result(self, pipeline_specification, scores):

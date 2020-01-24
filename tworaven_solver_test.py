@@ -8,81 +8,93 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 
-
-# data_path = '/home/shoe/TwoRavens/dev_scripts/time_series_data/shampoo.csv'
-#
-# pipeline_specification = {
-#     'preprocess': None,
-#     'model': {
-#         'strategy': 'SARIMAX'
-#     }
-# }
-#
-#
-# train_specification = {
-#     "problem": {
-#         "taskType": "FORECASTING",
-#         "predictors": [],
-#         "targets": ['Sales'],
-#         "time": ["Month"]
-#     },
-#     "input": {
-#         "name": "in-sample",
-#         "resource_uri": "file://" + data_path
-#     }
-# }
-
-
-# data_path = '/ravens_volume/test_data/TR_TS_appliance/TRAIN/dataset_TRAIN/tables/learningData.csv'
-#
-# pipeline_specification = {
-#     'preprocess': None,
-#     'model': {
-#         'strategy': 'VAR'
-#     }
-# }
-#
-#
-# train_specification = {
-#     "problem": {
-#         "taskType": "FORECASTING",
-#         "predictors": ["T1", "T2"],
-#         "targets": ['Appliances'],
-#         "time": ["date"]
-#     },
-#     "input": {
-#         "name": "in-sample",
-#         "resource_uri": "file://" + data_path
-#     }
-# }
-
-
-data_path = "/ravens_volume/test_data/185_baseball/TRAIN/dataset_TRAIN/tables/learningData.csv"
-
-pipeline_specification = {
-    'preprocess': "standard",
-    'model': {
-        'strategy': 'RANDOM_FOREST'
-    }
-}
-
-
-train_specification = {
-    "problem": {
-        "taskType": "CLASSIFICATION",
-        "predictors": ["Games_played", "Number_seasons", 'Player'],
-        "targets": ['Hall_of_Fame'],
-        "categorical": ['Position', 'Player']
+problems = {
+    'shampoo': {
+        'pipeline_specification': {
+            'preprocess': None,
+            'model': {
+                'strategy': 'SARIMAX'
+            }
+        },
+        'train_specification': {
+            "problem": {
+                "taskType": "FORECASTING",
+                "predictors": [],
+                "targets": ['Sales'],
+                "time": ["Month"]
+            },
+            "input": {
+                "name": "in-sample",
+                "resource_uri": "file://" + '/home/shoe/TwoRavens/dev_scripts/time_series_data/shampoo.csv'
+            }
+        }
     },
-    "input": {
-        "name": "in-sample",
-        "resource_uri": "file://" + data_path
+    'appliance': {
+        'pipeline_specification': {
+            'preprocess': None,
+            'model': {
+                'strategy': 'VAR'
+            }
+        },
+        'train_specification': {
+            "problem": {
+                "taskType": "FORECASTING",
+                "predictors": ["T1", "T2"],
+                "targets": ['Appliances'],
+                "time": ["date"]
+            },
+            "input": {
+                "name": "in-sample",
+                "resource_uri": "file://" + '/ravens_volume/test_data/TR_TS_appliance/TRAIN/dataset_TRAIN/tables/learningData.csv'
+            }
+        }
+    },
+    'baseball': {
+        'pipeline_specification': {
+            'preprocess': "standard",
+            'model': {
+                'strategy': 'RANDOM_FOREST'
+            }
+        },
+        'train_specification': {
+            "problem": {
+                "taskType": "CLASSIFICATION",
+                "predictors": ["Games_played", "Number_seasons", 'Player'],
+                "targets": ['Hall_of_Fame'],
+                "categorical": ['Position', 'Player']
+            },
+            "input": {
+                "name": "in-sample",
+                "resource_uri": "file://" + "/ravens_volume/test_data/185_baseball/TRAIN/dataset_TRAIN/tables/learningData.csv"
+            }
+        }
+    },
+    'baseball-regression': {
+        'pipeline_specification': {
+            'preprocess': "standard",
+            'model': {
+                'strategy': 'ORDINARY_LEAST_SQUARES'
+            }
+        },
+        'train_specification': {
+            "problem": {
+                "taskType": "REGRESSION",
+                "predictors": ["Runs", "Hits", "At_bats"],
+                "targets": ['Triples'],
+                "categorical": ['Position', 'Player']
+            },
+            "input": {
+                "name": "in-sample",
+                "resource_uri": "file://" + "/ravens_volume/test_data/185_baseball/TRAIN/dataset_TRAIN/tables/learningData.csv"
+            }
+        }
     }
 }
 
-model = tworaven_solver.fit_pipeline(
-    pipeline_specification=pipeline_specification,
-    train_specification=train_specification)
+problem = problems['baseball-regression']
+model = tworaven_solver.fit_pipeline(**problem)
+
+dataframe = pd.read_csv(problem['train_specification']['input']['resource_uri'].replace('file://', ''))
 
 # end = model.model.model._index[-1]
 # start = model.model.model._index[0]

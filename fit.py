@@ -6,7 +6,6 @@ from .utilities import (
     format_dataframe_time_index
 )
 import pandas as pd
-import numpy as np
 
 
 # given a pipeline json and data, return a solution
@@ -51,7 +50,9 @@ def fit_pipeline(pipeline_specification, train_specification):
             model=model,
             preprocess=preprocessor)
 
-    if model_specification['strategy'] in ['ORDINARY_LEAST_SQUARES', 'LOGISTIC_REGRESSION', 'RANDOM_FOREST']:
+    if model_specification['strategy'] in [
+        'ORDINARY_LEAST_SQUARES', 'LOGISTIC_REGRESSION', 'RANDOM_FOREST', 'SUPPORT_VECTOR_CLASSIFIER'
+    ]:
         return SciKitLearnWrapper(
             pipeline_specification=pipeline_specification,
             problem_specification=problem_specification,
@@ -81,7 +82,8 @@ def fit_model(dataframes, model_specification, problem_specification, start_para
         'SARIMAX': fit_model_sarimax,
         'ORDINARY_LEAST_SQUARES': fit_model_ordinary_linear_regression,
         'LOGISTIC_REGRESSION': fit_model_logistic_regression,
-        'RANDOM_FOREST': fit_model_random_forest
+        'RANDOM_FOREST': fit_model_random_forest,
+        'SUPPORT_VECTOR_CLASSIFIER': fit_model_svc
     }[model_specification['strategy']](dataframes, model_specification, problem_specification)
 
 
@@ -263,10 +265,38 @@ def fit_model_random_forest(dataframes, model_specification, problem_specificati
     """
     from sklearn.ensemble import RandomForestClassifier
 
-    model = RandomForestClassifier()
+    model = RandomForestClassifier(
+        **filter_args(model_specification, [
+            'bootstrap', 'class_weight', 'criterion', 'max_depth',
+            'max_features', 'max_leaf_nodes', 'min_impurity_decrease',
+            'min_impurity_split', 'min_samples_leaf', 'min_samples_split',
+            'min_weight_fraction_leaf', 'n_estimators'])
+    )
 
-    print(dataframes['targets'][problem_specification['targets'][0]])
-    print(np.asarray(dataframes['predictors']))
+    model.fit(
+        X=dataframes['predictors'],
+        y=dataframes['targets'][problem_specification['targets'][0]],
+        sample_weight=dataframes.get('weight'))
+
+    return model
+
+
+def fit_model_svc(dataframes, model_specification, problem_specification):
+    """
+    Return a support vector classification model
+
+    @param dataframes:
+    @param model_specification:
+    @param problem_specification:
+    """
+    from sklearn.svm import SVC
+
+    model = SVC(
+        **filter_args(model_specification, [
+            'C', 'kernel', 'degree', 'gamma', 'coef0', 'shrinking',
+            'probability', 'tol', 'cache_size', 'class_weight',
+            'max_iter', 'decision_function_shape', 'break_ties', 'random_state'])
+    )
 
     model.fit(
         X=dataframes['predictors'],

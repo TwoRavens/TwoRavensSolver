@@ -89,11 +89,18 @@ class BaseModelWrapper(object):
 class SciKitLearnWrapper(BaseModelWrapper):
     library = 'scikit-learn'
 
+    def describe(self):
+        pass
+
     def predict(self, dataframe):
         dataframe = dataframe[self.problem_specification['predictors']]
         if self.preprocess:
             dataframe = pd.DataFrame(data=self.preprocess.transform(dataframe), index=dataframe.index)
-        return pd.DataFrame(data=self.model.predict(dataframe), columns=self.problem_specification['targets'])
+
+        return pd.DataFrame(
+            data=self.model.predict(dataframe),
+            columns=self.problem_specification['targets'],
+            index=dataframe.index)
 
     def predict_proba(self, dataframe):
         dataframe = dataframe[self.problem_specification['predictors']]
@@ -185,6 +192,25 @@ class StatsModelsWrapper(BaseModelWrapper):
     def predict(self, dataframe):
         pass
 
+    def describe(self):
+        if type(self.model) is ARResultsWrapper:
+            return {
+                'model': f'AR({self.model.k_ar})',
+                'description': 'Autoregressive model'
+            }
+
+        if type(self.model) is VARResultsWrapper:
+            return {
+                'model': f'VAR({self.model.k_ar})',
+                'description': 'Vector Autoregressive model'
+            }
+
+        if type(self.model) is SARIMAXResultsWrapper:
+            return {
+                'model': f'SARIMAX({self.model.model.k_ar}, {self.model.model.k_diff}, {self.model.model.k_ma})',
+                'description': f'Seasonal autoregressive integrated moving average with exogenous regressors. The three values indicate the number of AR parameters, number of differences, and number of MA parameters.'
+            }
+
     def forecast(self, start, end):
         time = next(iter(self.problem_specification.get('time', [])), None)
         if type(self.model) is ARResultsWrapper:
@@ -261,7 +287,6 @@ class StatsModelsWrapper(BaseModelWrapper):
             predictions = pd.DataFrame(
                 data=self.model.predict(start, end),
                 columns=endog)
-            print(predictions)
             return predictions
 
     def refit(self, dataframe=None, data_specification=None):
