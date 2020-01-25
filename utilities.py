@@ -208,6 +208,6 @@ def preprocess(dataframe, specification):
     ])
 
     stimulus = dataframe[X]
-    stimulus = list(preprocessor.fit_transform(stimulus))
+    stimulus = preprocessor.fit_transform(stimulus)
 
     return stimulus, preprocessor
