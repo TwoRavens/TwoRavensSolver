@@ -1,4 +1,6 @@
 import os
+from dateutil import parser
+
 import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
@@ -119,6 +121,13 @@ def get_freq(series=None, granularity_specification=None):
     return sorted([(i, approx_seconds(i)) for i in candidate_frequencies], key=lambda x: x[1])[0][0]
 
 
+def get_date(value, time_format=None):
+    try:
+        return datetime.strptime(value, time_format) if time_format else parser.parse(value)
+    except (parser._parser.ParserError, ValueError):
+        # ignore if could not be parsed
+        pass
+
 # otherwise take the shortest date offset
 def approx_seconds(offset):
     """
@@ -178,9 +187,12 @@ def preprocess(dataframe, specification):
                             list(dataframe.select_dtypes(exclude=[np.number, "bool_", "object_"]).columns.values))
                             if i != y and i in X]
 
+    # keep up to the 20 most frequent levels
+    categories = [dataframe[col].value_counts()[:20].index.tolist() for col in categorical_features]
+
     categorical_transformer = Pipeline(steps=[
         ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
-        ('onehot', OneHotEncoder(handle_unknown='ignore', sparse=False))
+        ('onehot', OneHotEncoder(categories=categories, handle_unknown='ignore', sparse=False))
     ])
 
     numerical_features = list(dataframe.select_dtypes(include=[np.number]))
