@@ -88,6 +88,26 @@ problems = {
                 "resource_uri": "file://" + "/ravens_volume/test_data/185_baseball/TRAIN/dataset_TRAIN/tables/learningData.csv"
             }
         }
+    },
+    'phem': {
+        'pipeline_specification': {
+            'preprocess': "standard",
+            'model': {
+                'strategy': 'ORDINARY_LEAST_SQUARES'
+            }
+        },
+        'train_specification': {
+            "problem": {
+                "taskType": "REGRESSION",
+                "predictors": ["Runs", "Hits", "At_bats"],
+                "targets": ['Triples'],
+                "categorical": ['Position', 'Player']
+            },
+            "input": {
+                "name": "in-sample",
+                "resource_uri": "file://" + "/ravens_volume/test_data/185_baseball/TRAIN/dataset_TRAIN/tables/learningData.csv"
+            }
+        }
     }
 }
 

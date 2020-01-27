@@ -93,6 +93,7 @@ class SciKitLearnWrapper(BaseModelWrapper):
         pass
 
     def predict(self, dataframe):
+        index = dataframe.index
         dataframe = dataframe[self.problem_specification['predictors']]
         if self.preprocessors:
             dataframe = pd.DataFrame(
@@ -102,7 +103,7 @@ class SciKitLearnWrapper(BaseModelWrapper):
         return pd.DataFrame(
             data=self.model.predict(dataframe),
             columns=self.problem_specification['targets'],
-            index=dataframe.index)
+            index=index)
 
     def predict_proba(self, dataframe):
         dataframe = dataframe[self.problem_specification['predictors']]

@@ -66,7 +66,6 @@ class SearchManager(object):
         self.problem_specification = problem_specification
         self.system_params = system_params
 
-        print(problem_specification)
         task = problem_specification['taskType']
         subtask = problem_specification.get('taskSubtype')
 
@@ -75,8 +74,10 @@ class SearchManager(object):
             variables = problem_specification['targets'] + problem_specification['predictors']
             subtask = 'MULTIVARIATE' if len(variables) > 2 else 'UNIVARIATE'
 
-        print(subtask)
-        self.generator = iter(strategies.get(task, {}).get(subtask, []))
+        if problem_specification['taskType'] == 'FORECASTING' and self.problem_specification.get('crossSection'):
+            self.generator = iter(strategies.get(task, {}).get(subtask, []))
+        else:
+            self.generator = iter(strategies.get(task, {}).get(subtask, []))
 
     def get_pipeline_specification(self):
         try:

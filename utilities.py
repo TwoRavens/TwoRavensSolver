@@ -123,7 +123,7 @@ def get_freq(series=None, granularity_specification=None):
 
 def get_date(value, time_format=None):
     try:
-        return datetime.strptime(value, time_format) if time_format else parser.parse(value)
+        return datetime.strptime(value, time_format) if time_format else parser.parse(str(value))
     except (parser._parser.ParserError, ValueError):
         # ignore if could not be parsed
         pass
