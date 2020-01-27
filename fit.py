@@ -3,7 +3,8 @@ from .utilities import Dataset, preprocess
 from .utilities import (
     filter_args,
     get_freq,
-    format_dataframe_time_index
+    format_dataframe_time_index,
+    split_time_series
 )
 import pandas as pd
 
@@ -14,10 +15,6 @@ def fit_pipeline(pipeline_specification, train_specification):
     dataframe = Dataset(train_specification['input']).get_dataframe()
     problem_specification = train_specification['problem']
 
-    if problem_specification['taskType'] == 'FORECASTING':
-        time = next(iter(train_specification['problem'].get('time', [])), None)
-        dataframe = format_dataframe_time_index(dataframe, date=time)
-
     weights = problem_specification.get('weights')
     if weights and weights[0] in problem_specification['predictors']:
         problem_specification['predictors'].remove(weights[0])
@@ -27,43 +24,61 @@ def fit_pipeline(pipeline_specification, train_specification):
         problem_specification['predictors'].remove(times[0])
 
     if problem_specification['taskType'] == 'FORECASTING':
+        # returns a dict of dataframes, one for each treatment, one observation per time unit
+        dataframe_split = split_time_series(
+            dataframe=dataframe,
+            cross_section_names=problem_specification.get('crossSection', []))
+
+        print('dataframe_split', dataframe_split)
         time = next(iter(problem_specification.get('time', [])), None)
 
         # targets cannot be exogenous, subset exogenous labels to the predictor set
-        exog_names = [i for i in problem_specification.get('exogenous', []) if i in problem_specification['predictors']]
+        exog_names = [i for i in problem_specification.get('exogenous', []) if
+                      i in problem_specification['predictors'] and
+                      i not in problem_specification.get('crossSection', [])]
         # target variables are not transformed, all other variables are transformed
-        endog_non_target_names = [i for i in problem_specification['predictors'] if i not in exog_names and i != time]
+        endog_non_target_names = [i for i in problem_specification['predictors'] if
+                                  i not in exog_names and i != time and
+                                  i not in problem_specification.get('crossSection', [])]
         endog_target_names = [i for i in problem_specification['targets'] if i != time]
 
-        if exog_names:
-            exog, preprocess_exog = fit_preprocess(
-                dataframe[endog_non_target_names],
-                pipeline_specification['preprocess'],
-                train_specification)
-        else:
-            exog, preprocess_exog = None, None
+        dataframes = {}
+        preprocessors = {}
 
-        if endog_non_target_names:
-            endog_non_target, preprocess_endog = fit_preprocess(
-                dataframe[endog_non_target_names],
-                pipeline_specification['preprocess'],
-                train_specification)
-            endog = pd.concat([
-                dataframe[endog_target_names],
-                pd.DataFrame(endog_non_target, index=dataframe.index)],
-                axis=1)
-        else:
-            endog, preprocess_endog = dataframe[endog_target_names], None
+        for treatment_name in dataframe_split:
+            treatment_data = format_dataframe_time_index(dataframe_split[treatment_name], date=time)
+            if exog_names:
+                exog, preprocess_exog = preprocess(
+                    treatment_data[endog_non_target_names],
+                    # pipeline_specification['preprocess'],
+                    train_specification,
+                    X=endog_non_target_names)
+            else:
+                exog, preprocess_exog = None, None
 
-        dataframes = {
-            'exogenous': exog,
-            'endogenous': endog,
-            'time': dataframe.index
-        }
-        preprocessors = {
-            'exogenous': preprocess_exog,
-            'endogenous': preprocess_endog
-        }
+            if endog_non_target_names:
+                endog_non_target, preprocess_endog = preprocess(
+                    treatment_data[endog_non_target_names],
+                    # pipeline_specification['preprocess'],
+                    train_specification,
+                    X=endog_non_target_names)
+                endog = pd.concat([
+                    treatment_data[endog_target_names],
+                    pd.DataFrame(endog_non_target, index=treatment_data.index)],
+                    axis=1)
+            else:
+                endog, preprocess_endog = treatment_data[endog_target_names], None
+
+            dataframes[treatment_name] = {
+                'exogenous': exog,
+                'endogenous': endog,
+                'time': treatment_data.index,
+                'weight': treatment_data[weights[0]] if weights else None
+            }
+            preprocessors[treatment_name] = {
+                'exogenous': preprocess_exog,
+                'endogenous': preprocess_endog
+            }
     else:
         stimulus, preprocessor = fit_preprocess(
             dataframe[problem_specification['predictors']],
@@ -78,11 +93,14 @@ def fit_pipeline(pipeline_specification, train_specification):
             'predictors': preprocessor
         }
 
-    dataframes['weight'] = dataframe[weights[0]] if weights else None
+        dataframes['weight'] = dataframe[weights[0]] if weights else None
 
     # 3. modeling
     model_specification = pipeline_specification['model']
     model = fit_model(dataframes, model_specification, problem_specification)
+
+    print('fit model', model)
+    print('fit preprocessors', preprocessors)
 
     # 4. wrap and save
     from .model import StatsModelsWrapper, SciKitLearnWrapper
@@ -141,29 +159,34 @@ def fit_model_ar(dataframes, model_specification, problem_specification):
 
     time = next(iter(problem_specification.get('time', [])), None)
 
-    if time is None:
-        problem_specification['time'] = dataframes['time'].name
+    models = {}
 
-    freq = get_freq(
-        granularity_specification=problem_specification.get('timeGranularity'),
-        series=dataframes['time'])
+    for treatment_name, treatment_data in dataframes:
+        if time is None:
+            problem_specification['time'] = treatment_data['time'].name
 
-    # UPDATE: statsmodels==0.10.x
-    from statsmodels.tsa.ar_model import AR
-    model = AR(
-        endog=dataframes['endogenous'],
-        dates=dataframes['time'],
-        freq=freq)
-    return model.fit(**filter_args(model_specification, ['start_params', 'maxlags', 'ic', 'trend']))
+        freq = get_freq(
+            granularity_specification=problem_specification.get('timeGranularity'),
+            series=dataframes['time'])
 
-    # UPDATE: statsmodels==0.11.x
-    # from statsmodels.tsa.ar_model import AutoReg
-    # model = AutoReg(**{
-    #     'endog': dataframe[endog],
-    #     'exog': dataframe[exog] if exog else None,
-    #     **filter_args(model_spec, ['lags', 'trend', 'seasonal', 'hold_back', 'period'])
-    # })
-    # return model.fit()
+        # UPDATE: statsmodels==0.10.x
+        from statsmodels.tsa.ar_model import AR
+        model = AR(
+            endog=treatment_data['endogenous'],
+            dates=treatment_data['time'],
+            freq=freq)
+        models[treatment_name] = model.fit(**filter_args(model_specification, ['start_params', 'maxlags', 'ic', 'trend']))
+
+        # UPDATE: statsmodels==0.11.x
+        # from statsmodels.tsa.ar_model import AutoReg
+        # model = AutoReg(**{
+        #     'endog': dataframe[endog],
+        #     'exog': dataframe[exog] if exog else None,
+        #     **filter_args(model_spec, ['lags', 'trend', 'seasonal', 'hold_back', 'period'])
+        # })
+        # return model.fit()
+
+    return models
 
 
 def fit_model_var(dataframes, model_specification, problem_specification):
@@ -177,22 +200,28 @@ def fit_model_var(dataframes, model_specification, problem_specification):
 
     time = next(iter(problem_specification.get('time', [])), None)
 
-    if time is None:
-        problem_specification['time'] = dataframes['time'].name
+    models = {}
+    print('dataframes', dataframes)
 
-    freq = get_freq(
-        granularity_specification=problem_specification.get('timeGranularity'),
-        series=dataframes['time'])
+    for treatment_name, treatment_data in dataframes:
+        if time is None:
+            problem_specification['time'] = treatment_data['time'].name
 
-    from statsmodels.tsa.vector_ar.var_model import VAR
+        freq = get_freq(
+            granularity_specification=problem_specification.get('timeGranularity'),
+            series=treatment_data['time'])
 
-    model = VAR(
-        endog=dataframes['endogenous'],
-        exog=dataframes.get('exogenous'),
-        dates=dataframes['time'],
-        freq=freq)
-    # VAR cannot be trained with start_params, while AR can
-    return model.fit(**filter_args(model_specification, ['maxlags', 'ic', 'trend']))
+        from statsmodels.tsa.vector_ar.var_model import VAR
+
+        model = VAR(
+            endog=treatment_data['endogenous'],
+            exog=treatment_data.get('exogenous'),
+            dates=treatment_data['time'],
+            freq=freq)
+        # VAR cannot be trained with start_params, while AR can
+        models[treatment_name] = model.fit(**filter_args(model_specification, ['maxlags', 'ic', 'trend']))
+
+    return models
 
 
 def fit_model_sarimax(dataframes, model_specification, problem_specification):
@@ -206,30 +235,35 @@ def fit_model_sarimax(dataframes, model_specification, problem_specification):
 
     time = next(iter(problem_specification.get('time', [])), None)
 
-    if time is None:
-        problem_specification['time'] = dataframes['time'].name
+    models = {}
 
-    freq = get_freq(
-        granularity_specification=problem_specification.get('timeGranularity'),
-        series=dataframes['time'])
+    for treatment_name, treatment_data in dataframes:
+        if time is None:
+            problem_specification['time'] = treatment_data['time'].name
 
-    from statsmodels.tsa.statespace.sarimax import SARIMAX
+        freq = get_freq(
+            granularity_specification=problem_specification.get('timeGranularity'),
+            series=treatment_data['time'])
 
-    model = SARIMAX(
-        endog=dataframes['endogenous'],
-        exog=dataframes.get('exogenous'),
-        dates=dataframes['time'],
-        freq=freq,
-        **filter_args(model_specification, [
-            "order", "seasonal_order", "trend", "measurement_error",
-            "time_varying_regression", "mle_regression", "simple_differencing",
-            "enforce_stationarity", "enforce_invertibility", "hamilton_representation",
-            "concentrate_scale", "trend_offset", "use_exact_diffuse"]))
+        from statsmodels.tsa.statespace.sarimax import SARIMAX
 
-    return model.fit(**filter_args(model_specification, [
-        "start_params", "transformed", "includes_fixed", "cov_type", "cov_kwds",
-        "method", "maxiter", "full_output", "disp", "callback", "return_params",
-        "optim_score", "optim_complex_step", "optim_hessian", "flags", "low_memory"]))
+        model = SARIMAX(
+            endog=treatment_data['endogenous'],
+            exog=treatment_data.get('exogenous'),
+            dates=treatment_data['time'],
+            freq=freq,
+            **filter_args(model_specification, [
+                "order", "seasonal_order", "trend", "measurement_error",
+                "time_varying_regression", "mle_regression", "simple_differencing",
+                "enforce_stationarity", "enforce_invertibility", "hamilton_representation",
+                "concentrate_scale", "trend_offset", "use_exact_diffuse"]))
+
+        models[treatment_name] = model.fit(**filter_args(model_specification, [
+            "start_params", "transformed", "includes_fixed", "cov_type", "cov_kwds",
+            "method", "maxiter", "full_output", "disp", "callback", "return_params",
+            "optim_score", "optim_complex_step", "optim_hessian", "flags", "low_memory"]))
+
+    return models
 
 
 def fit_model_ordinary_linear_regression(dataframes, model_specification, problem_specification):

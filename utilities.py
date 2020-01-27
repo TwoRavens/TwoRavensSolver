@@ -176,10 +176,10 @@ class Dataset(object):
         return self.input.get('name', self.input['resource_uri'])
 
 
-def preprocess(dataframe, specification):
+def preprocess(dataframe, specification, X=None, y=None):
 
-    X = specification['problem']['predictors']
-    y = specification['problem']['targets'][0]
+    X = X if X else specification['problem']['predictors']
+    y = y if y else specification['problem']['targets'][0]
     nominal = [i for i in specification['problem'].get('categorical', []) if i in X]
     dataframe[nominal] = dataframe[nominal].astype(str)
 
@@ -211,3 +211,19 @@ def preprocess(dataframe, specification):
     stimulus = preprocessor.fit_transform(stimulus)
 
     return stimulus, preprocessor
+
+
+def split_time_series(dataframe, cross_section_names=None):
+    """
+    break a dataframe with cross sectional indicators into a dict of dataframes containing each treatment
+    @param dataframe:
+    @param cross_section_names: column names of cross sectional variables
+    @return:
+    """
+
+    # avoid unecessary data re-allocation
+    if not cross_section_names:
+        return {(): dataframe}
+
+    others = [i for i in dataframe.columns.values if i not in cross_section_names]
+    return {label: data[others] for label, data in dataframe.groupby(cross_section_names)}
