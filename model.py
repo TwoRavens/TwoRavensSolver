@@ -337,6 +337,9 @@ class StatsModelsWrapper(BaseModelWrapper):
                     predict[section] = treatment_name[i]
                 predictions.append(predict)
 
+        if not predictions:
+            return pd.DataFrame(data=[], columns=[index_names[0], *target_names])
+
         predictions = pd.concat(predictions)
 
         # remove interpolated entries in the time series that cannot be matched back to the input dataframe

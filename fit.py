@@ -37,6 +37,9 @@ def fit_pipeline(pipeline_specification, train_specification):
     if times and times[0] in problem_specification['predictors']:
         problem_specification['predictors'].remove(times[0])
 
+    # drop null values in the target column
+    dataframe = dataframe[dataframe[problem_specification['targets']].notnull().all(1)]
+
     if problem_specification['taskType'] == 'FORECASTING':
         # returns a dict of dataframes, one for each treatment, one observation per time unit
         dataframe_split = split_time_series(
