@@ -2,10 +2,10 @@
 strategies = {
     'FORECASTING': {
         'UNIVARIATE': [
-            {
-                'strategy': 'AR',
-                'library': 'statsmodels'
-            },
+            # {
+            #     'strategy': 'AR',
+            #     'library': 'statsmodels'
+            # },
             *[
                 {
                     'strategy': 'SARIMAX',

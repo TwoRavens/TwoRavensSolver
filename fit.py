@@ -204,18 +204,18 @@ def fit_model_ar(dataframes, model_specification, problem_specification):
         if time is None:
             problem_specification['time'] = treatment_data['time'].name
 
-        freq = get_freq(
-            granularity_specification=problem_specification.get('timeGranularity'),
-            series=dataframes['time'])
+        # freq = get_freq(
+        #     granularity_specification=problem_specification.get('timeGranularity'),
+        #     series=treatment_data['time'])
 
         # UPDATE: statsmodels==0.10.x
         from statsmodels.tsa.ar_model import AR
         model = AR(
             endog=treatment_data['endogenous'].astype(float),
             dates=treatment_data['time'],
-            freq=freq)
+            # freq=freq
+        )
         models[treatment_name] = model.fit(
-            trend='nc',
             **filter_args(model_specification, ['start_params', 'maxlags', 'ic', 'trend']))
 
         # UPDATE: statsmodels==0.11.x
@@ -259,11 +259,11 @@ def fit_model_var(dataframes, model_specification, problem_specification):
 
             # endog_mask = treatment_data['endogenous'].T.duplicated()
             # print('xx')
-            print(treatment_data['endogenous'])
+            # print(treatment_data['endogenous'])
             endog_mask = treatment_data['endogenous'].var(axis=0) > 0
-            print(endog_mask)
+            # print(endog_mask)
             endog = treatment_data['endogenous'][endog_mask.index[endog_mask]].astype(float)
-            print(endog.var(axis=0))
+            # print(endog.var(axis=0))
             # model_specification['drops'][treatment_name] = {'endogenous': endog_mask.tolist()}
             model_arguments = {'endog': endog}
 
@@ -300,14 +300,16 @@ def fit_model_sarimax(dataframes, model_specification, problem_specification):
 
     models = {}
 
-    for treatment_name, treatment_data in dataframes:
+    for treatment_name in dataframes:
         treatment_data = dataframes[treatment_name]
         if time is None:
             problem_specification['time'] = treatment_data['time'].name
 
-        freq = get_freq(
-            granularity_specification=problem_specification.get('timeGranularity'),
-            series=treatment_data['time'])
+        # freq = get_freq(
+        #     granularity_specification=problem_specification.get('timeGranularity'),
+        #     series=treatment_data['time'])
+        # print(freq)
+        # print(treatment_data['endogenous'])
 
         from statsmodels.tsa.statespace.sarimax import SARIMAX
 
@@ -319,7 +321,7 @@ def fit_model_sarimax(dataframes, model_specification, problem_specification):
             endog=treatment_data['endogenous'].astype(float),
             exog=exog,
             dates=treatment_data['time'],
-            freq=freq,
+            # freq=freq,
             **filter_args(model_specification, [
                 "order", "seasonal_order", "trend", "measurement_error",
                 "time_varying_regression", "mle_regression", "simple_differencing",

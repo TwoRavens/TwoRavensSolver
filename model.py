@@ -340,7 +340,9 @@ class StatsModelsWrapper(BaseModelWrapper):
         predictions = pd.concat(predictions)
 
         # remove interpolated entries in the time series that cannot be matched back to the input dataframe
-        predictions = predictions.dropna()[[*index_names, *target_names, time_name, *cross_section_names]]
+        predictions.dropna(inplace=True)
+        # predictions = predictions[[*index_names, *target_names, time_name, *cross_section_names]]
+
         # cast d3mIndex back to int (it became float due to na values)
         predictions[index_names[0]] = predictions[index_names[0]].astype(int)
 

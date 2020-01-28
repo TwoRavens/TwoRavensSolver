@@ -108,11 +108,28 @@ def get_freq(series=None, granularity_specification=None):
     if series is None:
         return None
 
+    # business_units = {
+    #     # "SM": "M",
+    #     "BM": "M",
+    #     "CBM": "M",
+    #     # "SMS": "MS",
+    #     "BMS": "MS",
+    #     "CBMS": "MS",
+    #     "BQ": "Q",
+    #     "BQS": "QS",
+    #     "BA": "A",
+    #     "BY": "Y",
+    #     "BAS": "AS",
+    #     "BYS": "YS",
+    #     "BH": "H",
+    # }
     # infer frequency from every three-pair of records
     candidate_frequencies = set()
     for i in range(len(series) - 3):
         candidate_frequency = pd.infer_freq(series[i:i + 3])
         if candidate_frequency:
+            # for unit in business_units:
+            #     candidate_frequency.replace(unit, business_units[unit])
             candidate_frequencies.add(candidate_frequency)
 
     # if data has no trio of evenly spaced records
