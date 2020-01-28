@@ -74,6 +74,9 @@ def resample_dataframe_time_index(dataframe, date, freq=None):
     for dropped_column in categorical_columns:
         dataframe_temp[dropped_column] = dataframe[dropped_column]
 
+    # drop columns that are completely na
+    dataframe_temp = dataframe_temp.dropna(how='all', axis=1)
+
     dataframe_imputed = pd.DataFrame(ColumnTransformer(transformers=[
         ('numeric', SimpleImputer(strategy='median'), numeric_columns),
         ('categorical', SimpleImputer(strategy='most_frequent'), categorical_columns)
