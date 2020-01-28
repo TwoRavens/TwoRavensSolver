@@ -259,10 +259,11 @@ def fit_model_var(dataframes, model_specification, problem_specification):
 
             # endog_mask = treatment_data['endogenous'].T.duplicated()
             # print('xx')
-            # print(treatment_data['endogenous'])
+            print(treatment_data['endogenous'])
             endog_mask = treatment_data['endogenous'].var(axis=0) > 0
+            print(endog_mask)
             endog = treatment_data['endogenous'][endog_mask.index[endog_mask]].astype(float)
-            # print(endog.var(axis=0))
+            print(endog.var(axis=0))
             # model_specification['drops'][treatment_name] = {'endogenous': endog_mask.tolist()}
             model_arguments = {'endog': endog}
 

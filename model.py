@@ -13,6 +13,7 @@ from statsmodels.tsa.statespace.sarimax import SARIMAXResultsWrapper
 import json
 import os
 import pandas as pd
+import numpy as np
 
 
 class BaseModelWrapper(object):
@@ -280,20 +281,28 @@ class StatsModelsWrapper(BaseModelWrapper):
                 start_model = min(max(start, model.model._index[model.k_ar]), model.model._index[-1])
                 end_model = max(start_model, end)
 
+                new_time_index = pd.date_range(
+                    start=start_model,
+                    end=end_model,
+                    freq=model.model._index.freq)
+
+                predict = model.model.predict(
+                    params=model.params,
+                    start=start_model, end=end_model)
+
+                if len(predict) == 0:
+                    predict = np.empty(shape=(0, len(endog_target_names)))
+                if len(predict) > len(new_time_index):
+                    predict = predict[:len(new_time_index)]
+
+                # predictions don't provide dates; dates reconstructed based on freq
                 predict = pd.DataFrame(
-                    data=model.model.predict(
-                        params=model.params,
-                        start=start_model, end=end_model)[:, :len(endog_target_names)],
+                    data=predict[:, :len(endog_target_names)],
                     columns=endog_target_names)
 
                 # print('date range: ', start, end)
                 # print('model range: ', start_model, end_model)
-
-                # predictions don't provide dates; dates reconstructed based on freq
-                predict[time_name] = pd.date_range(
-                    start=start_model,
-                    end=end_model,
-                    freq=model.model._index.freq)
+                predict[time_name] = new_time_index
 
                 if start_model > start:
                     # print('prepending data from before range')
