@@ -6,8 +6,22 @@ from .utilities import (
     format_dataframe_time_index,
     split_time_series
 )
-import pandas as pd
 
+from sklearn.linear_model import LinearRegression, LogisticRegression, RidgeClassifier, \
+    Lasso, LassoLars, ElasticNet, OrthogonalMatchingPursuit
+from sklearn.ensemble import\
+    RandomForestClassifier, RandomForestRegressor,\
+    AdaBoostClassifier, AdaBoostRegressor, \
+    GradientBoostingClassifier, GradientBoostingRegressor
+from sklearn.svm import SVC, SVR
+from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
+from sklearn.gaussian_process import GaussianProcessClassifier, GaussianProcessRegressor
+from sklearn.naive_bayes import MultinomialNB, GaussianNB, ComplementNB
+
+import pandas as pd
+import inspect
 
 # given a pipeline json and data, return a solution
 def fit_pipeline(pipeline_specification, train_specification):
@@ -106,16 +120,14 @@ def fit_pipeline(pipeline_specification, train_specification):
 
     # 4. wrap and save
     from .model import StatsModelsWrapper, SciKitLearnWrapper
-    if model_specification['strategy'] in ['AR', 'SARIMAX', 'VAR']:
+    if model_specification['library'] == 'statsmodels':
         return StatsModelsWrapper(
             pipeline_specification=pipeline_specification,
             problem_specification=problem_specification,
             model=model,
             preprocessors=preprocessors)
 
-    if model_specification['strategy'] in [
-        'ORDINARY_LEAST_SQUARES', 'LOGISTIC_REGRESSION', 'RANDOM_FOREST', 'SUPPORT_VECTOR_CLASSIFIER'
-    ]:
+    if model_specification['library'] == 'sklearn':
         return SciKitLearnWrapper(
             pipeline_specification=pipeline_specification,
             problem_specification=problem_specification,
@@ -139,14 +151,38 @@ def fit_model(dataframes, model_specification, problem_specification, start_para
             **model_specification
         }
 
+
+
     return {
         'AR': fit_model_ar,
         'VAR': fit_model_var,
         'SARIMAX': fit_model_sarimax,
-        'ORDINARY_LEAST_SQUARES': fit_model_ordinary_linear_regression,
-        'LOGISTIC_REGRESSION': fit_model_logistic_regression,
-        'RANDOM_FOREST': fit_model_random_forest,
-        'SUPPORT_VECTOR_CLASSIFIER': fit_model_svc
+        'ORDINARY_LEAST_SQUARES': factory_fit_model_sklearn(LinearRegression),
+        'LOGISTIC_REGRESSION': factory_fit_model_sklearn(LogisticRegression),
+        'RANDOM_FOREST': factory_fit_model_sklearn(RandomForestClassifier),
+        'SUPPORT_VECTOR_CLASSIFIER': factory_fit_model_sklearn(SVC),
+        "RIDGE_CLASSIFIER": factory_fit_model_sklearn(RidgeClassifier),
+        "RANDOM_FOREST_REGRESSOR": factory_fit_model_sklearn(RandomForestRegressor),
+        "SUPPORT_VECTOR_REGRESSION": factory_fit_model_sklearn(SVR),
+        "K_NEIGHBORS_CLASSIFIER": factory_fit_model_sklearn(KNeighborsClassifier),
+        "K_NEIGHBORS_REGRESSOR": factory_fit_model_sklearn(KNeighborsRegressor),
+        "DECISION_TREE_CLASSIFIER": factory_fit_model_sklearn(DecisionTreeClassifier),
+        "DECISION_TREE_REGRESSOR": factory_fit_model_sklearn(DecisionTreeRegressor),
+        "LASSO_REGRESSION": factory_fit_model_sklearn(Lasso),
+        "LASSO_REGRESSION_LARS": factory_fit_model_sklearn(LassoLars),
+        "ELASTIC_NET": factory_fit_model_sklearn(ElasticNet),
+        "ORTHOGONAL_MATCHING": factory_fit_model_sklearn(OrthogonalMatchingPursuit),
+        "ADABOOST_CLASSIFIER": factory_fit_model_sklearn(AdaBoostClassifier),
+        "ADABOOST_REGRESSOR": factory_fit_model_sklearn(AdaBoostRegressor),
+        "GRADIENT_BOOSTING_CLASSIFIER": factory_fit_model_sklearn(GradientBoostingClassifier),
+        "GRADIENT_BOOSTING_REGRESSOR": factory_fit_model_sklearn(GradientBoostingRegressor),
+        "LINEAR_DISCRIMINANT_ANALYSIS": factory_fit_model_sklearn(LinearDiscriminantAnalysis),
+        "QUADRATIC_DISCRIMINANT_ANALYSIS": factory_fit_model_sklearn(QuadraticDiscriminantAnalysis),
+        "GAUSSIAN_PROCESS_CLASSIFIER": factory_fit_model_sklearn(GaussianProcessClassifier),
+        "GAUSSIAN_PROCESS_REGRESSOR": factory_fit_model_sklearn(GaussianProcessRegressor),
+        "MULTINOMIAL_NAIVE_BAYES": factory_fit_model_sklearn(MultinomialNB),
+        "GAUSSIAN_NAIVE_BAYES": factory_fit_model_sklearn(GaussianNB),
+        "COMPLEMENT_NAIVE_BAYES": factory_fit_model_sklearn(ComplementNB),
     }[model_specification['strategy']](dataframes, model_specification, problem_specification)
 
 
@@ -297,98 +333,34 @@ def fit_model_sarimax(dataframes, model_specification, problem_specification):
     return models
 
 
-def fit_model_ordinary_linear_regression(dataframes, model_specification, problem_specification):
+def factory_fit_model_sklearn(sklearn_class):
     """
-    Return a fitted linear regression model
+    Return a function that will fit the provided class
 
     @param dataframes:
     @param model_specification:
     @param problem_specification:
     """
+    def fit_model(dataframes, model_specification, problem_specification):
+        """
+        Return a fitted model
 
-    from sklearn.linear_model import LinearRegression
+        @param dataframes:
+        @param model_specification:
+        @param problem_specification:
+        """
+        model = sklearn_class(
+            **filter_args(
+                model_specification,
+                list(inspect.signature(sklearn_class.__init__).parameters.keys())))
 
-    model = LinearRegression(
-        **filter_args(model_specification, [
-            "penalty", "dual", "tol", "C", "fit_intercept", "intercept_scaling",
-            "class_weight", "random_state", "solver", "max_iter", "multi_class",
-            "verbose", "warm_start", "n_jobs", "l1_ratio"]))
-
-    model.fit(
-        X=dataframes['predictors'],
-        y=dataframes['targets'][problem_specification['targets'][0]],
-        sample_weight=dataframes.get('weight')
-    )
-
-    return model
-
-
-def fit_model_logistic_regression(dataframes, model_specification, problem_specification):
-    """
-    Return a fitted logistic regression model
-
-    @param dataframes:
-    @param model_specification:
-    @param problem_specification:
-    """
-    from sklearn.linear_model import LogisticRegression
-
-    model = LogisticRegression()
-
-    model.fit(
-        X=dataframes['predictors'],
-        y=dataframes['targets'][problem_specification['targets'][0]],
-        sample_weight=dataframes.get('weight'))
-
-    return model
-
-
-def fit_model_random_forest(dataframes, model_specification, problem_specification):
-    """
-    Return a random forest model
-
-    @param dataframes:
-    @param model_specification:
-    @param problem_specification:
-    """
-    from sklearn.ensemble import RandomForestClassifier
-
-    model = RandomForestClassifier(
-        **filter_args(model_specification, [
-            'bootstrap', 'class_weight', 'criterion', 'max_depth',
-            'max_features', 'max_leaf_nodes', 'min_impurity_decrease',
-            'min_impurity_split', 'min_samples_leaf', 'min_samples_split',
-            'min_weight_fraction_leaf', 'n_estimators'])
-    )
-
-    model.fit(
-        X=dataframes['predictors'],
-        y=dataframes['targets'][problem_specification['targets'][0]],
-        sample_weight=dataframes.get('weight'))
-
-    return model
-
-
-def fit_model_svc(dataframes, model_specification, problem_specification):
-    """
-    Return a support vector classification model
-
-    @param dataframes:
-    @param model_specification:
-    @param problem_specification:
-    """
-    from sklearn.svm import SVC
-
-    model = SVC(
-        **filter_args(model_specification, [
-            'C', 'kernel', 'degree', 'gamma', 'coef0', 'shrinking',
-            'probability', 'tol', 'cache_size', 'class_weight',
-            'max_iter', 'decision_function_shape', 'break_ties', 'random_state'])
-    )
-
-    model.fit(
-        X=dataframes['predictors'],
-        y=dataframes['targets'][problem_specification['targets'][0]],
-        sample_weight=dataframes.get('weight'))
-
-    return model
+        model.fit(
+            **filter_args(
+                {
+                    'X': dataframes['predictors'],
+                    'y': dataframes['targets'][problem_specification['targets'][0]],
+                    'sample_weight': dataframes.get('weight')
+                },
+                list(inspect.signature(sklearn_class.fit).parameters.keys())))
+        return model
+    return fit_model

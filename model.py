@@ -1,9 +1,10 @@
 import abc
+import inspect
 
 import warnings
 import joblib
 
-from .utilities import split_time_series, format_dataframe_time_index
+from .utilities import split_time_series, format_dataframe_time_index, filter_args
 
 from statsmodels.tsa.ar_model import ARResultsWrapper
 from statsmodels.tsa.vector_ar.var_model import VARResultsWrapper
@@ -130,10 +131,11 @@ class SciKitLearnWrapper(BaseModelWrapper):
                 data=self.preprocessors['predictors'].transform(data_predictors),
                 index=dataframe.index)
 
-        self.model.fit(
-            X=data_predictors,
-            y=dataframe[targets[0]],
-            sample_weight=dataframe[weight[0]] if weight else None)
+        self.model.fit(**filter_args({
+            'X': data_predictors,
+            'y': dataframe[targets[0]],
+            'sample_weight': dataframe[weight[0]] if weight else None
+        }, list(inspect.signature(self.model.fit).parameters.keys())))
 
         self.data_specification = data_specification
 
