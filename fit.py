@@ -29,13 +29,13 @@ def fit_pipeline(pipeline_specification, train_specification):
             dataframe=dataframe,
             cross_section_names=problem_specification.get('crossSection', []))
 
-        print('dataframe_split', dataframe_split)
         time = next(iter(problem_specification.get('time', [])), None)
 
         # targets cannot be exogenous, subset exogenous labels to the predictor set
         exog_names = [i for i in problem_specification.get('exogenous', []) if
                       i in problem_specification['predictors'] and
                       i not in problem_specification.get('crossSection', [])]
+        # print('exog_names', exog_names)
         # target variables are not transformed, all other variables are transformed
         endog_non_target_names = [i for i in problem_specification['predictors'] if
                                   i not in exog_names and i != time and
@@ -46,13 +46,15 @@ def fit_pipeline(pipeline_specification, train_specification):
         preprocessors = {}
 
         for treatment_name in dataframe_split:
-            treatment_data = format_dataframe_time_index(dataframe_split[treatment_name], date=time)
+            treatment_data = format_dataframe_time_index(
+                dataframe_split[treatment_name],
+                date=time)
             if exog_names:
                 exog, preprocess_exog = preprocess(
-                    treatment_data[endog_non_target_names],
+                    treatment_data[exog_names],
                     # pipeline_specification['preprocess'],
                     train_specification,
-                    X=endog_non_target_names)
+                    X=exog_names)
             else:
                 exog, preprocess_exog = None, None
 
@@ -62,6 +64,9 @@ def fit_pipeline(pipeline_specification, train_specification):
                     # pipeline_specification['preprocess'],
                     train_specification,
                     X=endog_non_target_names)
+
+                # print(treatment_name)
+                # print(endog_non_target_names)
                 endog = pd.concat([
                     treatment_data[endog_target_names],
                     pd.DataFrame(endog_non_target, index=treatment_data.index)],
@@ -98,9 +103,6 @@ def fit_pipeline(pipeline_specification, train_specification):
     # 3. modeling
     model_specification = pipeline_specification['model']
     model = fit_model(dataframes, model_specification, problem_specification)
-
-    print('fit model', model)
-    print('fit preprocessors', preprocessors)
 
     # 4. wrap and save
     from .model import StatsModelsWrapper, SciKitLearnWrapper
@@ -161,7 +163,8 @@ def fit_model_ar(dataframes, model_specification, problem_specification):
 
     models = {}
 
-    for treatment_name, treatment_data in dataframes:
+    for treatment_name in dataframes:
+        treatment_data = dataframes[treatment_name]
         if time is None:
             problem_specification['time'] = treatment_data['time'].name
 
@@ -172,10 +175,12 @@ def fit_model_ar(dataframes, model_specification, problem_specification):
         # UPDATE: statsmodels==0.10.x
         from statsmodels.tsa.ar_model import AR
         model = AR(
-            endog=treatment_data['endogenous'],
+            endog=treatment_data['endogenous'].astype(float),
             dates=treatment_data['time'],
             freq=freq)
-        models[treatment_name] = model.fit(**filter_args(model_specification, ['start_params', 'maxlags', 'ic', 'trend']))
+        models[treatment_name] = model.fit(
+            trend='nc',
+            **filter_args(model_specification, ['start_params', 'maxlags', 'ic', 'trend']))
 
         # UPDATE: statsmodels==0.11.x
         # from statsmodels.tsa.ar_model import AutoReg
@@ -201,26 +206,47 @@ def fit_model_var(dataframes, model_specification, problem_specification):
     time = next(iter(problem_specification.get('time', [])), None)
 
     models = {}
-    print('dataframes', dataframes)
 
-    for treatment_name, treatment_data in dataframes:
-        if time is None:
-            problem_specification['time'] = treatment_data['time'].name
+    model_specification['drops'] = {}
 
-        freq = get_freq(
-            granularity_specification=problem_specification.get('timeGranularity'),
-            series=treatment_data['time'])
+    for treatment_name in dataframes:
+        try:
+            treatment_data = dataframes[treatment_name]
+            if time is None:
+                problem_specification['time'] = treatment_data['time'].name
 
-        from statsmodels.tsa.vector_ar.var_model import VAR
+            freq = get_freq(
+                granularity_specification=problem_specification.get('timeGranularity'),
+                series=treatment_data['time'])
 
-        model = VAR(
-            endog=treatment_data['endogenous'],
-            exog=treatment_data.get('exogenous'),
-            dates=treatment_data['time'],
-            freq=freq)
-        # VAR cannot be trained with start_params, while AR can
-        models[treatment_name] = model.fit(**filter_args(model_specification, ['maxlags', 'ic', 'trend']))
+            from statsmodels.tsa.vector_ar.var_model import VAR
 
+            # endog_mask = treatment_data['endogenous'].T.duplicated()
+            # print('xx')
+            # print(treatment_data['endogenous'])
+            endog_mask = treatment_data['endogenous'].var(axis=0) > 0
+            endog = treatment_data['endogenous'][endog_mask.index[endog_mask]].astype(float)
+            # print(endog.var(axis=0))
+            # model_specification['drops'][treatment_name] = {'endogenous': endog_mask.tolist()}
+            model_arguments = {'endog': endog}
+
+            if treatment_data.get('exogenous'):
+                # exog_mask = treatment_data['exogenous'].T.duplicated()
+                exog_mask = treatment_data['exogenous'].var(axis=0) > 0
+                # model_specification['drops'][treatment_name] = exog_mask.tolist()
+                model_arguments['exog'] = treatment_data['exogenous'][exog_mask.index[exog_mask]].astype(float)
+
+            model = VAR(
+                **model_arguments,
+                dates=treatment_data['time'],
+                freq=freq)
+            # VAR cannot be trained with start_params, while AR can
+            models[treatment_name] = model.fit(
+                **filter_args(model_specification, ['maxlags', 'ic', 'trend']))
+        except Exception:
+            # import traceback
+            # traceback.print_exc()
+            print('skipping cross section: ' + str(treatment_name))
     return models
 
 
@@ -238,6 +264,7 @@ def fit_model_sarimax(dataframes, model_specification, problem_specification):
     models = {}
 
     for treatment_name, treatment_data in dataframes:
+        treatment_data = dataframes[treatment_name]
         if time is None:
             problem_specification['time'] = treatment_data['time'].name
 
@@ -247,9 +274,13 @@ def fit_model_sarimax(dataframes, model_specification, problem_specification):
 
         from statsmodels.tsa.statespace.sarimax import SARIMAX
 
+        exog = treatment_data.get('exogenous')
+        if exog is not None:
+            exog = exog.astype(float)
+
         model = SARIMAX(
-            endog=treatment_data['endogenous'],
-            exog=treatment_data.get('exogenous'),
+            endog=treatment_data['endogenous'].astype(float),
+            exog=exog,
             dates=treatment_data['time'],
             freq=freq,
             **filter_args(model_specification, [

@@ -1,5 +1,6 @@
 import abc
 
+import warnings
 import joblib
 
 from .utilities import split_time_series, format_dataframe_time_index
@@ -219,20 +220,28 @@ class StatsModelsWrapper(BaseModelWrapper):
 
     def predict(self, dataframe):
         cross_section_names = self.problem_specification.get('crossSection', [])
-        treatments_data = split_time_series(dataframe=dataframe, cross_section_names=cross_section_names)
         time_name = next(iter(self.problem_specification.get('time', [])), None)
         index_names = self.problem_specification.get('indexes', ['d3mIndex'])
+        target_names = self.problem_specification['targets']
+
+        treatments_data = split_time_series(dataframe=dataframe, cross_section_names=cross_section_names)
         predictions = []
         predict = None
 
-        print(self.model)
+        # print(list(treatments_data.keys())[:10])
+        # print(list(self.model.keys())[:10])
         for treatment_name in treatments_data:
             treatment = treatments_data[treatment_name]
+
+            if treatment_name not in self.model:
+                continue
+            model = self.model[treatment_name]
 
             treatment = format_dataframe_time_index(
                 treatment,
                 date=time_name,
-                granularity_specification=self.problem_specification.get('timeGranularity'))
+                granularity_specification=self.problem_specification.get('timeGranularity'),
+                freq=model.model._index.freq)
             treatment.reset_index(inplace=True)
 
             start = treatment[time_name].iloc[0]
@@ -240,8 +249,7 @@ class StatsModelsWrapper(BaseModelWrapper):
 
             index = treatment[index_names]
             treatment.drop(index_names, inplace=True, axis=1)
-
-            model = self.model[treatment_name]
+            # print('index', index)
 
             if self.pipeline_specification['model']['strategy'] == 'AR':
                 # model.model.endog = dataframe_history
@@ -257,7 +265,7 @@ class StatsModelsWrapper(BaseModelWrapper):
                     predict = pd.concat([
                         pd.DataFrame(index=pd.date_range(
                             start, model.model._index[model.model.k_ar - 1],
-                            freq=model.model._index_freq)),
+                            freq=model.model._index.freq)),
                         predict
                     ])
                 # index name is missing
@@ -268,7 +276,7 @@ class StatsModelsWrapper(BaseModelWrapper):
                 endog_target_names = [i for i in self.problem_specification['targets'] if i != time_name]
 
                 start_model = min(max(start, model.model._index[model.k_ar]), model.model._index[-1])
-                end_model = max(start, end)
+                end_model = max(start_model, end)
 
                 predict = pd.DataFrame(
                     data=model.model.predict(
@@ -276,21 +284,28 @@ class StatsModelsWrapper(BaseModelWrapper):
                         start=start_model, end=end_model)[:, :len(endog_target_names)],
                     columns=endog_target_names)
 
+                # print('date range: ', start, end)
+                # print('model range: ', start_model, end_model)
+
                 # predictions don't provide dates; dates reconstructed based on freq
                 predict[time_name] = pd.date_range(
                     start=start_model,
                     end=end_model,
-                    freq=model.model._index_freq)
+                    freq=model.model._index.freq)
 
                 if start_model > start:
+                    # print('prepending data from before range')
                     predict = pd.concat([
                         pd.DataFrame(index=pd.date_range(
                             start, model.model._index[model.k_ar - 1],
-                            freq=model.model._index_freq)),
+                            freq=model.model._index.freq)),
                         predict
                     ])
                 if start_model < start:
+                    # print(predict)
+                    # print('removing data from below the asked-for-interval, but was forecasted')
                     predict = predict[predict[time_name] >= start]
+                    # print(predict)
 
             if self.pipeline_specification['model']['strategy'] == 'SARIMAX':
                 all = self.problem_specification['targets'] + self.problem_specification['predictors']
@@ -301,13 +316,26 @@ class StatsModelsWrapper(BaseModelWrapper):
                     data=model.predict(start, end),
                     columns=endog)
 
-            if predict:
+            if predict is not None:
+                # removing data from below the asked-for interval, for example, can make the index start from non-zero
+                predict.reset_index(drop=True, inplace=True)
+
                 predict[index_names] = index
+
                 for i, section in enumerate(cross_section_names):
                     predict[section] = treatment_name[i]
                 predictions.append(predict)
 
-        return pd.concat(predictions)
+        predictions = pd.concat(predictions)
+
+        # remove interpolated entries in the time series that cannot be matched back to the input dataframe
+        predictions = predictions.dropna()[[*index_names, *target_names, time_name, *cross_section_names]]
+        # cast d3mIndex back to int (it became float due to na values)
+        predictions[index_names[0]] = predictions[index_names[0]].astype(int)
+
+        # indices are duplicated after concat
+        predictions.reset_index(drop=True, inplace=True)
+        return predictions
 
     def refit(self, dataframe=None, data_specification=None):
         pass
@@ -337,21 +365,25 @@ class StatsModelsWrapper(BaseModelWrapper):
             for preprocessor_name in self.preprocessors[treatment_name]:
                 preprocess_treatment_dir = os.path.join(preprocess_dir, str(hash(treatment_name)))
                 os.makedirs(preprocess_treatment_dir, exist_ok=True)
-                joblib.dump(
-                    self.preprocessors[treatment_name][preprocessor_name],
-                    os.path.join(preprocess_treatment_dir, f'{preprocessor_name}.joblib'))
+                with warnings.catch_warnings():
+                    joblib.dump(
+                        self.preprocessors[treatment_name][preprocessor_name],
+                        os.path.join(preprocess_treatment_dir, f'{preprocessor_name}.joblib'))
 
         model_dir = os.path.join(solution_dir, model_folder)
         os.makedirs(model_dir, exist_ok=True)
         for treatment_name in self.model:
-            joblib.dump(
-                self.model[treatment_name],
-                os.path.join(solution_dir, model_folder, f'{hash(treatment_name)}.json'))
+            with warnings.catch_warnings():
+                joblib.dump(
+                    self.model[treatment_name],
+                    os.path.join(solution_dir, model_folder, f'{hash(treatment_name)}.joblib'))
 
-        with open(os.path.join(solution_dir, 'model_treatments.csv'), 'w') as treatment_file:
+        with open(os.path.join(solution_dir, 'model_treatments.json'), 'w') as treatment_file:
             json.dump(
-                [{'name': list(treatment_name) if type(treatment_name) is tuple else [treatment_name], 'id': hash(treatment_name)} for treatment_name in self.model],
+                [{'name': treatment_name, 'id': hash(treatment_name)} for treatment_name in self.model],
                 treatment_file)
+        # print('SAVED:', len(self.model))
+        # print(solution_dir)
 
         metadata_path = os.path.join(solution_dir, 'solution.json')
         with open(metadata_path, 'w') as metadata_file:
@@ -367,7 +399,7 @@ class StatsModelsWrapper(BaseModelWrapper):
     @staticmethod
     def load(solution_dir, metadata=None):
 
-        print('solution dir', solution_dir)
+        # print('solution dir', solution_dir)
 
         if not metadata:
             metadata_path = os.path.join(solution_dir, 'solution.json')
@@ -381,20 +413,25 @@ class StatsModelsWrapper(BaseModelWrapper):
         model_dir = os.path.join(solution_dir, metadata['model_folder'])
         preprocess_dir = os.path.join(solution_dir, metadata['preprocess_folder'])
 
-        with open(os.path.join(solution_dir, 'model_treatments.csv'), 'r') as treatment_file:
+        with open(os.path.join(solution_dir, 'model_treatments.json'), 'r') as treatment_file:
             treatments = json.load(treatment_file)
 
         preprocessors = {}
         models = {}
         for treatment in treatments:
-            treatment['name'] = tuple(treatment['name'])
+
+            if type(treatment['name']) is list:
+                treatment['name'] = tuple(treatment['name'])
+            if type(treatment['name']) is not tuple:
+                treatment['name'] = (treatment['name'],)
+
             model_path = os.path.join(model_dir, f'{treatment["id"]}.joblib')
             models[treatment['name']] = joblib.load(model_path)
 
-            preprocess_path = os.path.join(preprocess_dir, treatment['name'])
+            preprocess_path = os.path.join(preprocess_dir, str(treatment['id']))
             preprocessors[treatment['name']] = {}
             for preprocessor_name in os.listdir(preprocess_path):
-                preprocessor_path = os.path.join(preprocess_path, f'{preprocessor_name}.joblib')
+                preprocessor_path = os.path.join(preprocess_path, preprocessor_name)
                 preprocessors[treatment['name']][preprocessor_name] = joblib.load(preprocessor_path)
 
         # reconstruct model with data it was trained on

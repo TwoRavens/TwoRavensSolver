@@ -14,7 +14,7 @@ def filter_args(arguments, intersect):
     return {k: arguments[k] for k in intersect if k in arguments}
 
 
-def format_dataframe_time_index(dataframe, date=None, granularity_specification=None):
+def format_dataframe_time_index(dataframe, date=None, granularity_specification=None, freq=None):
     """
     Ensure dataframe index is of type pd.DatetimeIndex on the date column
     @param dataframe: arbitrarily indexed dataframe
@@ -29,11 +29,13 @@ def format_dataframe_time_index(dataframe, date=None, granularity_specification=
     # attempt to parse given date column
     if date in dataframe:
         try:
-            dataframe[date] = pd.to_datetime(dataframe[date], infer_datetime_format=True)
+            dataframe[date] = dataframe[date].astype(str).apply(parser.parse)
+            # not flexible enough
+            # dataframe[date] = pd.to_datetime(dataframe[date], infer_datetime_format=True)
             return resample_dataframe_time_index(
                 dataframe=dataframe,
                 date=date,
-                freq=get_freq(granularity_specification=granularity_specification))
+                freq=freq or get_freq(granularity_specification=granularity_specification))
         except ValueError:
             pass
 
@@ -54,8 +56,8 @@ def resample_dataframe_time_index(dataframe, date, freq=None):
     estimated_freq = get_freq(series=temporal_series)
 
     # fall back to linspace if data is completely irregular
-    if not estimated_freq:
-        estimated_freq = (temporal_series[-1] - temporal_series[0]) / len(dataframe)
+    if temporal_series is not None and not estimated_freq:
+        estimated_freq = (temporal_series.iloc[-1] - temporal_series.iloc[0]) / len(dataframe)
 
     # if time series is regular and freq happens to match
     if pd.infer_freq(temporal_series) and approx_seconds(freq) == approx_seconds(estimated_freq):
@@ -187,6 +189,10 @@ def preprocess(dataframe, specification, X=None, y=None):
                             list(dataframe.select_dtypes(exclude=[np.number, "bool_", "object_"]).columns.values))
                             if i != y and i in X]
 
+    # print('preprocess X', X)
+    # print('preprocess cate features')
+    # print(categorical_features)
+
     # keep up to the 20 most frequent levels
     categories = [dataframe[col].value_counts()[:20].index.tolist() for col in categorical_features]
 
@@ -195,8 +201,16 @@ def preprocess(dataframe, specification, X=None, y=None):
         ('onehot', OneHotEncoder(categories=categories, handle_unknown='ignore', sparse=False))
     ])
 
-    numerical_features = list(dataframe.select_dtypes(include=[np.number]))
-    numerical_features = [i for i in X if i not in categorical_features and i in numerical_features]
+    # numerical_features = dataframe.select_dtypes([np.number]).columns.values
+    # print('dtypes', dataframe.dtypes)
+    # print('dtype numeric', numerical_features)
+    numerical_features = [i for i in X if i not in categorical_features
+                          # and i in numerical_features
+                          ]
+    # print('preprocess numerical features')
+    # print(numerical_features)
+    # print(dataframe)
+
     numerical_transformer = Pipeline(steps=[
         ('imputer', SimpleImputer(strategy='median')),
         ('scaler', StandardScaler())
