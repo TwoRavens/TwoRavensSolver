@@ -41,15 +41,6 @@ class BaseModelWrapper(object):
         pass
 
     @abc.abstractmethod
-    def forecast(self, dataframe_history, horizon=1):
-        """
-        Forecasts the next observation, horizon steps ahead
-        @param dataframe_history: historical data from which to forecast from
-        @param horizon: number of time steps ahead to predict
-        """
-        pass
-
-    @abc.abstractmethod
     def refit(self, dataframe=None, data_specification=None):
         """
         Refit the model parameters without changing the hyperparameters.
@@ -235,8 +226,10 @@ class StatsModelsWrapper(BaseModelWrapper):
         # print(list(self.model.keys())[:10])
         for treatment_name in treatments_data:
             treatment = treatments_data[treatment_name]
-
+            if type(treatment_name) is not tuple:
+                treatment_name = (treatment_name,)
             if treatment_name not in self.model:
+                print('unknown treatment:', treatment_name)
                 continue
             model = self.model[treatment_name]
 
@@ -326,7 +319,7 @@ class StatsModelsWrapper(BaseModelWrapper):
                 predict = pd.DataFrame(
                     data=model.predict(start, end),
                     columns=endog)
-
+            # print(predict)
             if predict is not None:
                 # removing data from below the asked-for interval, for example, can make the index start from non-zero
                 predict.reset_index(drop=True, inplace=True)
