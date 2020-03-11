@@ -23,6 +23,7 @@ from sklearn.naive_bayes import MultinomialNB, GaussianNB, ComplementNB
 import pandas as pd
 import inspect
 
+
 # given a pipeline json and data, return a solution
 def fit_pipeline(pipeline_specification, train_specification):
     # 1. load data
@@ -53,6 +54,7 @@ def fit_pipeline(pipeline_specification, train_specification):
                       i in problem_specification['predictors'] and
                       i not in problem_specification.get('crossSection', [])]
         # print('exog_names', exog_names)
+
         # target variables are not transformed, all other variables are transformed
         endog_non_target_names = [i for i in problem_specification['predictors'] if
                                   i not in exog_names and i != time and
@@ -154,11 +156,10 @@ def fit_model(dataframes, model_specification, problem_specification, start_para
             **model_specification
         }
 
-
-
     return {
         'AR': fit_model_ar,
         'VAR': fit_model_var,
+        'ANN': fit_model_ann,
         'SARIMAX': fit_model_sarimax,
         'ORDINARY_LEAST_SQUARES': factory_fit_model_sklearn(LinearRegression),
         'LOGISTIC_REGRESSION': factory_fit_model_sklearn(LogisticRegression),
@@ -370,3 +371,42 @@ def factory_fit_model_sklearn(sklearn_class):
                 list(inspect.signature(sklearn_class.fit).parameters.keys())))
         return model
     return fit_model
+
+
+def fit_model_ann(dataframes, model_specification, problem_specification):
+    """
+    Return a fitted autoregression model
+    @param dataframes:
+    @param model_specification: {'lags': int, ...}
+    @param problem_specification:
+    """
+    # Assume the dataframes is already in order
+    # 'Y' variable is in the first column, AR only requires 'Y' value
+    time = next(iter(problem_specification.get('time', [])), None)
+    back_steps = model_specification.get('back_steps', 1)  # At least 1 time step is required
+
+    models = dict()
+
+    # Create tensor for torch
+    for treatment_name in dataframes:
+        treatment_data = dataframes[treatment_name]
+        if time is None:
+            problem_specification['time'] = treatment_data['time'].name
+
+        # Only considering endogenous features now
+        container = treatment_data['endogenous'].astype(float)
+        tgt_name = container.columns[0]
+        y_column = container[tgt_name]
+        tmp_block = container.drop(columns=[tgt_name])
+
+        tgt_y, tgt_x = y_column, tmp_block
+        for step in range(1, back_steps + 1):
+            tmp_x = container.shift(step)
+            tmp_x.columns = ['{}_{}'.format(col, step) for col in tmp_x.columns]
+            tgt_x = pd.concat((tgt_x, tmp_x), axis=1)
+
+        final_block = pd.concat((tgt_y, tgt_x), axis=1)
+
+
+
+    pass

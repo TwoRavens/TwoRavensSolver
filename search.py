@@ -13,13 +13,21 @@ strategies = {
                     'order': order,
                 }
                 for order in [(1, 0, 0), (1, 1, 1), (4, 1, 2), (2, 1, 0)]
-            ]
+            ],
+            *[
+                {'strategy': 'ANN', 'library': 'torch', 'back_steps': step, }
+                for step in [1, 2, 3]  # 'step' denotes the number of previous time_index will be considered
+            ],
         ],
         'MULTIVARIATE': [
             {
                 'strategy': 'VAR',
                 'library': 'statsmodels'
-            }
+            },
+            *[
+                {'strategy': 'ANN', 'library': 'torch', 'back_steps': step, }
+                for step in [1, 2, 3]  # 'step' denotes the number of previous time_index will be considered
+            ],
         ]
     },
     'CLASSIFICATION': {
@@ -101,8 +109,8 @@ strategies = {
 
 class SearchManager(object):
     def __init__(self, system_params, problem_specification):
-        self.problem_specification = problem_specification
-        self.system_params = system_params
+        self.problem_specification = problem_specification  # Dataset & Problem JSON
+        self.system_params = system_params  # Model & Preprocess JSON
 
         task = problem_specification['taskType']
         subtask = problem_specification.get('taskSubtype')
@@ -112,6 +120,8 @@ class SearchManager(object):
             variables = problem_specification['targets'] + problem_specification['predictors']
             subtask = 'MULTIVARIATE' if len(variables) > 2 else 'UNIVARIATE'
 
+        # What's the difference ?
+        # Iterate through all possible solutions
         if problem_specification['taskType'] == 'FORECASTING' and self.problem_specification.get('crossSection'):
             self.generator = iter(strategies.get(task, {}).get(subtask, []))
         else:
