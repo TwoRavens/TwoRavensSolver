@@ -8,7 +8,7 @@ class NLayerMLP(nn.Module):
         super(NLayerMLP, self).__init__()
         components = list()
         if not inner_blocks:
-            components.append(nn.Linear(input_dim, 64))
+            components.append(nn.Linear(input_dim, input_dim * 4))
             if 'relu' == activation:
                 components.append(nn.ReLU())
             elif 'leaky_relu' == activation:
@@ -19,7 +19,7 @@ class NLayerMLP(nn.Module):
                 components.append(nn.Tanh())
             else:
                 raise NotImplementedError('Unsupported Activation Function {}'.format(activation))
-            components.append(nn.Linear(64, output_dim))
+            components.append(nn.Linear(input_dim * 4, output_dim))
         else:
             # inner_block is a list of layer configuration (input_dim & output_dim excluded)
             # E.G. (L1, L2, ..., Lk)
@@ -44,6 +44,7 @@ class NLayerMLP(nn.Module):
             components.append(nn.Linear(pre_dim, output_dim))
 
         self.model = nn.Sequential(*components)
+        self.out_dim = output_dim
 
     def forward(self, x):
         return self.model(x)

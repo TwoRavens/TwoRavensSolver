@@ -54,7 +54,6 @@ def fit_pipeline(pipeline_specification, train_specification):
                       i in problem_specification['predictors'] and
                       i not in problem_specification.get('crossSection', [])]
         # print('exog_names', exog_names)
-
         # target variables are not transformed, all other variables are transformed
         endog_non_target_names = [i for i in problem_specification['predictors'] if
                                   i not in exog_names and i != time and
@@ -123,8 +122,10 @@ def fit_pipeline(pipeline_specification, train_specification):
     model_specification = pipeline_specification['model']
     model = fit_model(dataframes, model_specification, problem_specification)
 
+    # model_specification['library'] = 'statsmodels'
+
     # 4. wrap and save
-    from .model import StatsModelsWrapper, SciKitLearnWrapper
+    from .model import StatsModelsWrapper, SciKitLearnWrapper, TorchModelsWrapper
     if model_specification['library'] == 'statsmodels':
         return StatsModelsWrapper(
             pipeline_specification=pipeline_specification,
@@ -134,6 +135,14 @@ def fit_pipeline(pipeline_specification, train_specification):
 
     if model_specification['library'] == 'sklearn':
         return SciKitLearnWrapper(
+            pipeline_specification=pipeline_specification,
+            problem_specification=problem_specification,
+            model=model,
+            preprocessors=preprocessors)
+
+    # TODO: Not finished
+    if model_specification['library'] == 'torch':
+        return TorchModelsWrapper(
             pipeline_specification=pipeline_specification,
             problem_specification=problem_specification,
             model=model,
@@ -156,10 +165,14 @@ def fit_model(dataframes, model_specification, problem_specification, start_para
             **model_specification
         }
 
+
+
     return {
         'AR': fit_model_ar,
-        'VAR': fit_model_var,
-        'ANN': fit_model_ann,
+        'AR_NN': fit_model_ar_ann,
+        'VAR_NN': fit_model_var_ann,
+        # 'VAR': fit_model_var,
+        # 'SARIMAX': fit_model_var_ann,
         'SARIMAX': fit_model_sarimax,
         'ORDINARY_LEAST_SQUARES': factory_fit_model_sklearn(LinearRegression),
         'LOGISTIC_REGRESSION': factory_fit_model_sklearn(LogisticRegression),
@@ -306,6 +319,7 @@ def fit_model_sarimax(dataframes, model_specification, problem_specification):
 
     for treatment_name in dataframes:
         treatment_data = dataframes[treatment_name]
+        print(treatment_data)
         if time is None:
             problem_specification['time'] = treatment_data['time'].name
 
@@ -373,7 +387,7 @@ def factory_fit_model_sklearn(sklearn_class):
     return fit_model
 
 
-def fit_model_ann(dataframes, model_specification, problem_specification):
+def fit_model_ar_ann(dataframes, model_specification, problem_specification):
     """
     Return a fitted autoregression model
     @param dataframes:
@@ -387,26 +401,86 @@ def fit_model_ann(dataframes, model_specification, problem_specification):
 
     models = dict()
 
-    # Create tensor for torch
     for treatment_name in dataframes:
         treatment_data = dataframes[treatment_name]
         if time is None:
             problem_specification['time'] = treatment_data['time'].name
 
         # Only considering endogenous features now
+        if treatment_data['exogenous']:
+            print('Exogenous features will not be considered now.')
+
         container = treatment_data['endogenous'].astype(float)
         tgt_name = container.columns[0]
         y_column = container[tgt_name]
         tmp_block = container.drop(columns=[tgt_name])
 
         tgt_y, tgt_x = y_column, tmp_block
+
         for step in range(1, back_steps + 1):
+            tgt_y = tgt_y.drop(tgt_y.index[0])
             tmp_x = container.shift(step)
-            tmp_x.columns = ['{}_{}'.format(col, step) for col in tmp_x.columns]
+            tmp_x.columns = ['{}_minus_{}'.format(col, step) for col in tmp_x.columns]
             tgt_x = pd.concat((tgt_x, tmp_x), axis=1)
 
-        final_block = pd.concat((tgt_y, tgt_x), axis=1)
+        train_x, train_y = tgt_x.dropna(), tgt_y.dropna()
+
+        from .torch_model.linear_model import NLayerMLP
+        from .torch_model.train import fit_model
+
+        # Training model for current df
+        model = NLayerMLP(len(train_x.columns), 1)
+        fit_model(model, train_x, train_y)
+
+        models[treatment_name] = model
+
+    return models
 
 
+def fit_model_var_ann(dataframes, model_specification, problem_specification):
+    """
+    Return a fitted autoregression model
+    @param dataframes:
+    @param model_specification: {'lags': int, ...}
+    @param problem_specification:
+    """
+    # Assume the dataframes is already in order
+    # 'Y' variable is in the first column, AR only requires 'Y' value
+    time = next(iter(problem_specification.get('time', [])), None)
+    back_steps = model_specification.get('back_steps', 1)  # At least 1 time step is required
 
-    pass
+    models = dict()
+
+    for treatment_name in dataframes:
+        treatment_data = dataframes[treatment_name]
+        if time is None:
+            problem_specification['time'] = treatment_data['time'].name
+
+        # Only considering endogenous features now
+        if treatment_data['exogenous']:
+            print('Exogenous features will not be considered now.')
+
+        container = treatment_data['endogenous'].astype(float)
+        y_column = container  # Predict Y, X1, X2 ... simultaneously
+        tmp_block = pd.DataFrame()
+
+        tgt_y, tgt_x = y_column, tmp_block
+
+        for step in range(1, back_steps + 1):
+            tgt_y = tgt_y.drop(tgt_y.index[0])
+            tmp_x = container.shift(step)
+            tmp_x.columns = ['{}_minus_{}'.format(col, step) for col in tmp_x.columns]
+            tgt_x = pd.concat((tgt_x, tmp_x), axis=1)
+
+        train_x, train_y = tgt_x.dropna(), tgt_y.dropna()
+
+        from .torch_model.linear_model import NLayerMLP
+        from .torch_model.train import fit_model
+
+        # Training model for current df
+        model = NLayerMLP(len(train_x.columns), len(train_y.columns))
+        fit_model(model, train_x, train_y)
+
+        models[treatment_name] = model
+
+    return models

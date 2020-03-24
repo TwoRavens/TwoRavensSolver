@@ -25,7 +25,7 @@ problems = {
             },
             "input": {
                 "name": "in-sample",
-                "resource_uri": "file://" + '/home/shoe/TwoRavens/dev_scripts/time_series_data/shampoo.csv'
+                "resource_uri": "file://" + '/ravens_volume/test_data/TR_TS_shampoo/TRAIN/dataset_TRAIN/tables/learningData.csv'
             }
         }
     },
@@ -111,16 +111,24 @@ problems = {
     }
 }
 
-problem = problems['baseball-regression']
-model = tworaven_solver.fit_pipeline(**problem)
+# Only support for time series forecasting
+
+from tworaven_solver.search import SearchManager
+
+problem = problems['appliance']
+pip_spe, train_spe = problem['pipeline_specification'], problem['train_specification']
+search_manager = SearchManager(None, train_spe['problem'])
+new_pip = search_manager.get_pipeline_specification()
+
+model = tworaven_solver.fit_pipeline(new_pip, train_spe)
 
 dataframe = pd.read_csv(problem['train_specification']['input']['resource_uri'].replace('file://', ''))
 
 # end = model.model.model._index[-1]
 # start = model.model.model._index[0]
-
+#
 # model.model.plot_forecast()
-
+#
 # import matplotlib.pyplot as plt
 #
 # plt.show()
