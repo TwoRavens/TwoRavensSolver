@@ -3,6 +3,7 @@ import inspect
 
 import warnings
 import joblib
+import torch
 
 from .utilities import split_time_series, format_dataframe_time_index, filter_args
 
@@ -473,13 +474,13 @@ class TorchModelsWrapper(BaseModelWrapper):
         if 1 == self.model.out_dim:
             return {
                 'model': 'AR_NN',
-                'description': 'Autoregressive model'
+                'description': 'Auto-regressive model'
             }
 
         if 1 != self.model.out_dim:
             return {
-                'model': f'VAR_NN',
-                'description': 'Vector Autoregressive model'
+                'model': 'VAR_NN',
+                'description': 'Vector Auto-regressive model'
             }
 
     def predict(self, dataframe):
@@ -492,8 +493,6 @@ class TorchModelsWrapper(BaseModelWrapper):
         predictions = []
         predict = None
 
-        # print(list(treatments_data.keys())[:10])
-        # print(list(self.model.keys())[:10])
         for treatment_name in treatments_data:
             treatment = treatments_data[treatment_name]
             if type(treatment_name) is not tuple:
@@ -581,25 +580,6 @@ class TorchModelsWrapper(BaseModelWrapper):
                     predict = predict[predict[time_name] >= start]
                     # print(predict)
 
-            if self.pipeline_specification['model']['strategy'] == 'SARIMAX':
-                all = self.problem_specification['targets'] + self.problem_specification['predictors']
-                exog_names = [i for i in self.problem_specification.get('exogenous', []) if i in all]
-                endog = [i for i in all if i not in exog_names and i != time_name]
-
-                predict = pd.DataFrame(
-                    data=model.predict(start, end),
-                    columns=endog)
-            # print(predict)
-            if predict is not None:
-                # removing data from below the asked-for interval, for example, can make the index start from non-zero
-                predict.reset_index(drop=True, inplace=True)
-
-                predict[index_names] = index
-
-                for i, section in enumerate(cross_section_names):
-                    predict[section] = treatment_name[i]
-                predictions.append(predict)
-
         if not predictions:
             return pd.DataFrame(data=[], columns=[index_names[0], *target_names])
 
@@ -617,20 +597,7 @@ class TorchModelsWrapper(BaseModelWrapper):
         return predictions
 
     def refit(self, dataframe=None, data_specification=None):
-        pass
-    #     if data_specification is not None and json.dumps(data_specification) == json.dumps(self.data_specification):
-    #         return
-    #
-    #     if dataframe is None:
-    #         dataframe = Dataset(data_specification).get_dataframe()
-    #
-    #     self.model = fit_model(
-    #         dataframe=dataframe,
-    #         model_specification=self.pipeline_specification['model'],
-    #         problem_specification=self.problem_specification,
-    #         start_params=self.model.params)
-    #
-    #     self.data_specification = data_specification
+        raise NotImplementedError('Unsupported operation')
 
     def save(self, solution_dir):
         # self.model.remove_data()
@@ -651,18 +618,16 @@ class TorchModelsWrapper(BaseModelWrapper):
 
         model_dir = os.path.join(solution_dir, model_folder)
         os.makedirs(model_dir, exist_ok=True)
+
         for treatment_name in self.model:
             with warnings.catch_warnings():
-                joblib.dump(
-                    self.model[treatment_name],
-                    os.path.join(solution_dir, model_folder, f'{hash(treatment_name)}.joblib'))
+                torch.save(self.model[treatment_name],
+                           os.path.join(solution_dir, model_folder, f'{hash(treatment_name)}.pt'))
 
         with open(os.path.join(solution_dir, 'model_treatments.json'), 'w') as treatment_file:
             json.dump(
                 [{'name': treatment_name, 'id': hash(treatment_name)} for treatment_name in self.model],
                 treatment_file)
-        # print('SAVED:', len(self.model))
-        # print(solution_dir)
 
         metadata_path = os.path.join(solution_dir, 'solution.json')
         with open(metadata_path, 'w') as metadata_file:
@@ -704,8 +669,8 @@ class TorchModelsWrapper(BaseModelWrapper):
             if type(treatment['name']) is not tuple:
                 treatment['name'] = (treatment['name'],)
 
-            model_path = os.path.join(model_dir, f'{treatment["id"]}.joblib')
-            models[treatment['name']] = joblib.load(model_path)
+            model_path = os.path.join(model_dir, f'{treatment["id"]}.pt')
+            models[treatment['name']] = torch.load(model_path)
 
             preprocess_path = os.path.join(preprocess_dir, str(treatment['id']))
             preprocessors[treatment['name']] = {}
@@ -713,20 +678,7 @@ class TorchModelsWrapper(BaseModelWrapper):
                 preprocessor_path = os.path.join(preprocess_path, preprocessor_name)
                 preprocessors[treatment['name']][preprocessor_name] = joblib.load(preprocessor_path)
 
-        # reconstruct model with data it was trained on
-        # if metadata['problem_specification']['taskType'] == 'FORECASTING' and data_specification:
-        #     dataframe = Dataset(data_specification).get_dataframe()
-        #
-        #     exog_names = problem_specification['predictors']
-        #     endog_names = problem_specification['targets']
-        #     date_name = problem_specification.get('time')
-        #
-        #     dataframe = format_dataframe_time_index(dataframe, date_name)
-        #     model.model.endog = dataframe[endog_names]
-        #     if type(model) == VARResultsWrapper:
-        #         model.model.exog = dataframe[exog_names]
-
-        return StatsModelsWrapper(
+        return TorchModelsWrapper(
             pipeline_specification=pipeline_specification,
             problem_specification=problem_specification,
             data_specification=data_specification,

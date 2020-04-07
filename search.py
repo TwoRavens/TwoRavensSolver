@@ -17,7 +17,7 @@ strategies = {
             *[
                 {
                     'strategy': 'AR_NN',
-                    'library': 'torch',
+                    'library': 'sklearn',
                     'back_steps': step,
                 } for step in [1, 2, 3, 4]
             ]
@@ -30,7 +30,7 @@ strategies = {
             *[
                 {
                     'strategy': 'VAR_NN',
-                    'library': 'torch',
+                    'library': 'sklearn',
                     'back_steps': step,
                 } for step in [1, 2, 3, 4]
             ]

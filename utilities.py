@@ -150,7 +150,6 @@ def get_date(value, time_format=None):
         # ignore if could not be parsed
         pass
 
-
 # otherwise take the shortest date offset
 def approx_seconds(offset):
     """

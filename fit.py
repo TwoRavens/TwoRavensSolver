@@ -24,11 +24,22 @@ import pandas as pd
 import inspect
 
 
+_LOSS_FUNCTIONS = {
+    'meanSquaredError': 'squared_loss',
+    'rootMeanSquaredError': 'rooted_squared_loss',
+    'meanAbsoluteError': 'mean_absolute_loss',
+}
+
+
 # given a pipeline json and data, return a solution
 def fit_pipeline(pipeline_specification, train_specification):
     # 1. load data
     dataframe = Dataset(train_specification['input']).get_dataframe()
     problem_specification = train_specification['problem']
+
+    # Add performanceMetric into train_specification
+    loss_name = train_specification.get("performanceMetric", None)
+    problem_specification['performanceMetric'] = loss_name
 
     weights = problem_specification.get('weights')
     if weights and weights[0] in problem_specification['predictors']:
@@ -140,7 +151,6 @@ def fit_pipeline(pipeline_specification, train_specification):
             model=model,
             preprocessors=preprocessors)
 
-    # TODO: Not finished
     if model_specification['library'] == 'torch':
         return TorchModelsWrapper(
             pipeline_specification=pipeline_specification,
@@ -171,8 +181,8 @@ def fit_model(dataframes, model_specification, problem_specification, start_para
         'AR': fit_model_ar,
         'AR_NN': fit_model_ar_ann,
         'VAR_NN': fit_model_var_ann,
-        # 'VAR': fit_model_var,
-        # 'SARIMAX': fit_model_var_ann,
+        'VAR': fit_model_var,
+        # 'SARIMAX': fit_model_ar_ann,
         'SARIMAX': fit_model_sarimax,
         'ORDINARY_LEAST_SQUARES': factory_fit_model_sklearn(LinearRegression),
         'LOGISTIC_REGRESSION': factory_fit_model_sklearn(LogisticRegression),
@@ -319,7 +329,6 @@ def fit_model_sarimax(dataframes, model_specification, problem_specification):
 
     for treatment_name in dataframes:
         treatment_data = dataframes[treatment_name]
-        print(treatment_data)
         if time is None:
             problem_specification['time'] = treatment_data['time'].name
 
@@ -398,6 +407,8 @@ def fit_model_ar_ann(dataframes, model_specification, problem_specification):
     # 'Y' variable is in the first column, AR only requires 'Y' value
     time = next(iter(problem_specification.get('time', [])), None)
     back_steps = model_specification.get('back_steps', 1)  # At least 1 time step is required
+    loss_func = problem_specification.get('performanceMetric', None)
+    loss_func = 'meanSquaredError' if not loss_func else loss_func
 
     models = dict()
 
@@ -411,6 +422,7 @@ def fit_model_ar_ann(dataframes, model_specification, problem_specification):
             print('Exogenous features will not be considered now.')
 
         container = treatment_data['endogenous'].astype(float)
+        # print(container)
         tgt_name = container.columns[0]
         y_column = container[tgt_name]
         tmp_block = container.drop(columns=[tgt_name])
@@ -425,14 +437,11 @@ def fit_model_ar_ann(dataframes, model_specification, problem_specification):
 
         train_x, train_y = tgt_x.dropna(), tgt_y.dropna()
 
-        from .torch_model.linear_model import NLayerMLP
-        from .torch_model.train import fit_model
+        from .nn_models.NlayerMLP import ModMLPRegressor
 
         # Training model for current df
-        model = NLayerMLP(len(train_x.columns), 1)
-        fit_model(model, train_x, train_y)
-
-        models[treatment_name] = model
+        model = ModMLPRegressor(loss=_LOSS_FUNCTIONS[loss_func])
+        model.fit(train_x, train_y)
 
     return models
 
@@ -448,6 +457,8 @@ def fit_model_var_ann(dataframes, model_specification, problem_specification):
     # 'Y' variable is in the first column, AR only requires 'Y' value
     time = next(iter(problem_specification.get('time', [])), None)
     back_steps = model_specification.get('back_steps', 1)  # At least 1 time step is required
+    loss_func = problem_specification.get('performanceMetric', None)
+    loss_func = 'meanSquaredError' if not loss_func else loss_func
 
     models = dict()
 
@@ -474,13 +485,10 @@ def fit_model_var_ann(dataframes, model_specification, problem_specification):
 
         train_x, train_y = tgt_x.dropna(), tgt_y.dropna()
 
-        from .torch_model.linear_model import NLayerMLP
-        from .torch_model.train import fit_model
+        from .nn_models.NlayerMLP import ModMLPRegressor
 
         # Training model for current df
-        model = NLayerMLP(len(train_x.columns), len(train_y.columns))
-        fit_model(model, train_x, train_y)
-
-        models[treatment_name] = model
+        model = ModMLPRegressor(loss=_LOSS_FUNCTIONS[loss_func])
+        model.fit(train_x, train_y)
 
     return models
