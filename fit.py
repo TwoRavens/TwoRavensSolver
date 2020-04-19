@@ -26,9 +26,9 @@ import inspect
 
 
 _LOSS_FUNCTIONS = {
-    'meanSquaredError': 'squared_loss',
-    'rootMeanSquaredError': 'rooted_squared_loss',
-    'meanAbsoluteError': 'mean_absolute_loss',
+    'MEAN_SQUARED_ERROR': 'squared_loss',
+    'R_SQUARED': 'rooted_squared_loss',
+    'MEAN_ABSOLUTE_ERROR': 'mean_absolute_loss',
 }
 
 
@@ -39,7 +39,7 @@ def fit_pipeline(pipeline_specification, train_specification):
     problem_specification = train_specification['problem']
 
     # Add performanceMetric into train_specification
-    loss_name = train_specification.get("performanceMetric", 'meanSquaredError')
+    loss_name = train_specification.get("performanceMetric", {'metric': "MEAN_SQUARED_ERROR"})
     problem_specification['performanceMetric'] = loss_name
 
     weights = problem_specification.get('weights')
@@ -410,8 +410,8 @@ def fit_model_ar_ann(dataframes, model_specification, problem_specification):
     # 'Y' variable is in the first column, AR only requires 'Y' value
     time = next(iter(problem_specification.get('time', [])), None)
     back_steps = model_specification.get('back_steps', 1)  # At least 1 time step is required
-    loss_func = problem_specification.get('performanceMetric', None)
-    loss_func = 'meanSquaredError' if not loss_func else loss_func
+    loss_func = problem_specification.get('performanceMetric').get('metric')
+    loss_func = 'MEAN_SQUARED_ERROR' if (not loss_func or loss_func not in _LOSS_FUNCTIONS) else loss_func
     models = dict()
 
     for treatment_name in dataframes:
@@ -465,8 +465,8 @@ def fit_model_var_ann(dataframes, model_specification, problem_specification):
     # 'Y' variable is in the first column, AR only requires 'Y' value
     time = next(iter(problem_specification.get('time', [])), None)
     back_steps = model_specification.get('back_steps', 1)  # At least 1 time step is required
-    loss_func = problem_specification.get('performanceMetric', None)
-    loss_func = 'meanSquaredError' if not loss_func else loss_func
+    loss_func = problem_specification.get('performanceMetric').get('metric')
+    loss_func = 'MEAN_SQUARED_ERROR' if (not loss_func or loss_func not in _LOSS_FUNCTIONS) else loss_func
 
     models = dict()
 
