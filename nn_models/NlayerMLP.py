@@ -6,8 +6,9 @@ from sklearn.utils import check_X_y, column_or_1d
 from sklearn.utils.validation import check_is_fitted
 
 import numpy as np
+import copy
 
-NEW_LOSS_FUNCTIONS = LOSS_FUNCTIONS
+NEW_LOSS_FUNCTIONS = copy.copy(LOSS_FUNCTIONS)
 
 
 ''' Additional Loss function'''
@@ -147,7 +148,7 @@ class ModBaseMLP(BaseMultilayerPerceptron):
         return loss, coef_grads, intercept_grads
 
 
-class ModMLPRegressor(RegressorMixin, ModBaseMLP):
+class ModMLPForecaster(RegressorMixin, ModBaseMLP):
     def __init__(self, hidden_layer_sizes=(100,), activation="relu",
                  solver='adam', alpha=0.0001,
                  batch_size='auto', learning_rate="constant",
@@ -171,6 +172,8 @@ class ModMLPRegressor(RegressorMixin, ModBaseMLP):
             validation_fraction=validation_fraction,
             beta_1=beta_1, beta_2=beta_2, epsilon=epsilon,
             n_iter_no_change=n_iter_no_change)
+        self.history = None
+        self.back_step, self.length_per_point = -1, -1
 
     def predict(self, X):
         """Predict using the multi-layer perceptron model.
@@ -189,6 +192,29 @@ class ModMLPRegressor(RegressorMixin, ModBaseMLP):
             return y_pred.ravel()
         return y_pred
 
+    def forecast(self, X, steps):
+        """Forecast k-steps ahead using fiited MLP model.
+        Parameters
+        ----------
+        X : {array-like, sparse matrix} of shape (n_samples, n_features)
+            The input data. -- Not necessary
+
+        steps : Integer, number of steps forecast ahead
+        Returns
+        -------
+        y : ndarray of shape (n_samples, n_outputs)
+            The predicted values.
+        """
+        check_is_fitted(self, "coefs_")
+        res = list()
+        current_input = self.history
+        for s in range(steps):
+            tmp_pred = self._predict(current_input.reshape(1, -1))
+            res.append(tmp_pred.item(0))
+            current_input = np.concatenate((tmp_pred, current_input), axis=None)[:-self.length_per_point]
+
+        return np.asarray(res)
+
     def _validate_input(self, X, y, incremental):
         X, y = check_X_y(X, y, accept_sparse=['csr', 'csc', 'coo'],
                          multi_output=True, y_numeric=True)
@@ -196,47 +222,8 @@ class ModMLPRegressor(RegressorMixin, ModBaseMLP):
             y = column_or_1d(y, warn=True)
         return X, y
 
-
-import pandas as pd
-
-np.random.seed(0)
-NUM_SAMPLES = int(2e3)
-noise_ratio= 1e-2
-brand_spend = np.random.rand(NUM_SAMPLES)
-d2c_spend = np.random.rand(NUM_SAMPLES)
-geo_mean_mult = 10
-exp_brand_spend_mult = 1
-contributions =  {'brand':.01, 'd2c':.02}
-brand_contributions = brand_spend * contributions['brand']
-d2c_contributions = d2c_spend * contributions['d2c']
-geo_contribution = np.sqrt(brand_spend* d2c_spend) * geo_mean_mult
-exp_brand_contribution = np.exp(brand_spend) * exp_brand_spend_mult
-sales = brand_contributions + d2c_contributions + exp_brand_spend_mult + np.random.rand(NUM_SAMPLES) * noise_ratio
-dataset = pd.DataFrame({
-    'brand': brand_spend,
-    'd2c': d2c_spend,
-    'sales': sales
-}).round(5)
-X = dataset.drop('sales', 1)
-Y = dataset['sales']
-X1 = X['brand']
-X2 = X['d2c']
-
-
-def model_sales_regression(dataset, loss='squared_loss'):
-    num_samples = dataset.shape[0]
-    cutoff = (num_samples * 3) // 4
-    Xtrn = dataset.drop('sales', 1).iloc[:cutoff, :]
-    Ytrn = dataset['sales'].iloc[:cutoff]
-    Xval = dataset.drop('sales', 1).iloc[cutoff:, :]
-    Yval = dataset['sales'].iloc[cutoff:]
-    model = ModMLPRegressor(loss=loss).fit(Xtrn, Ytrn)
-    yhat = model.predict(dataset.drop('sales', 1))
-    yhatval = model.predict(Xval)
-    loss = NEW_LOSS_FUNCTIONS[loss](Yval, yhatval)
-
-    print('loss:', loss)
-
-    return model, yhat, loss
-
-model_sales_regression(dataset, 'mean_absolute_loss')
+    def set_history(self, data):
+        self.history = data.to_numpy()  # Ndarray
+        self.back_step = self.history.shape[0]
+        self.history = self.history.flatten()
+        self.length_per_point = self.history.shape[0] // self.back_step

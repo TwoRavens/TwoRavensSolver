@@ -145,12 +145,18 @@ search_manager = SearchManager(None, train_spe['problem'])
 new_pip = search_manager.get_pipeline_specification()
 # print(new_pip)
 
-while new_pip["model"]['strategy'] != "AR_NN":
+while new_pip["model"]['strategy'] != "SARIMAX":
     new_pip = search_manager.get_pipeline_specification()
 
 model = tworaven_solver.fit_pipeline(new_pip, train_spe)
 
-# dataframe = pd.read_csv(problem['train_specification']['input']['resource_uri'].replace('file://', ''))
+
+dataframe = pd.read_csv(problem['train_specification']['input']['resource_uri'].replace('file://', ''))
+
+# res = model.forecast(dataframe)
+res = model.predict(dataframe)
+print(res)
+
 
 # end = model.model.model._index[-1]
 # start = model.model.model._index[0]
