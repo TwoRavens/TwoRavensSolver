@@ -410,9 +410,8 @@ def fit_model_ar_ann(dataframes, model_specification, problem_specification):
     # 'Y' variable is in the first column, AR only requires 'Y' value
     time = next(iter(problem_specification.get('time', [])), None)
     back_steps = model_specification.get('back_steps', 1)  # At least 1 time step is required
-    # loss_func = problem_specification.get('performanceMetric', None)
-    # loss_func = 'meanSquaredError' if not loss_func else loss_func
-    loss_func = 'meanSquaredError'
+    loss_func = problem_specification.get('performanceMetric', None)
+    loss_func = 'meanSquaredError' if not loss_func else loss_func
     models = dict()
 
     for treatment_name in dataframes:
@@ -444,7 +443,7 @@ def fit_model_ar_ann(dataframes, model_specification, problem_specification):
         from .nn_models.NlayerMLP import ModMLPForecaster
 
         # Training model for current df
-        model = ModMLPForecaster(loss='squared_loss')
+        model = ModMLPForecaster(loss=_LOSS_FUNCTIONS[loss_func])
         model.fit(train_x, train_y)
 
         # history points should be stored for future reference
@@ -466,9 +465,8 @@ def fit_model_var_ann(dataframes, model_specification, problem_specification):
     # 'Y' variable is in the first column, AR only requires 'Y' value
     time = next(iter(problem_specification.get('time', [])), None)
     back_steps = model_specification.get('back_steps', 1)  # At least 1 time step is required
-    # loss_func = problem_specification.get('performanceMetric', None)
-    # loss_func = 'meanSquaredError' if not loss_func else loss_func
-    loss_func = 'meanSquaredError'
+    loss_func = problem_specification.get('performanceMetric', None)
+    loss_func = 'meanSquaredError' if not loss_func else loss_func
 
     models = dict()
 
@@ -499,7 +497,7 @@ def fit_model_var_ann(dataframes, model_specification, problem_specification):
         from .nn_models.NlayerMLP import ModMLPForecaster
 
         # Training model for current df
-        model = ModMLPForecaster(loss='squared_loss')
+        model = ModMLPForecaster(loss=_LOSS_FUNCTIONS[loss_func])
         model.fit(train_x, train_y)
 
         model.set_history(history_points)
