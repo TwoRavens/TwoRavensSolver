@@ -21,13 +21,26 @@ from sklearn.gaussian_process import GaussianProcessClassifier, GaussianProcessR
 from sklearn.naive_bayes import MultinomialNB, GaussianNB, ComplementNB
 
 import pandas as pd
+import numpy as np
 import inspect
+
+
+_LOSS_FUNCTIONS = {
+    'MEAN_SQUARED_ERROR': 'squared_loss',
+    'R_SQUARED': 'rooted_squared_loss',
+    'MEAN_ABSOLUTE_ERROR': 'mean_absolute_loss',
+}
+
 
 # given a pipeline json and data, return a solution
 def fit_pipeline(pipeline_specification, train_specification):
     # 1. load data
     dataframe = Dataset(train_specification['input']).get_dataframe()
     problem_specification = train_specification['problem']
+
+    # Add performanceMetric into train_specification
+    loss_name = train_specification.get("performanceMetric", {'metric': "MEAN_SQUARED_ERROR"})
+    problem_specification['performanceMetric'] = loss_name
 
     weights = problem_specification.get('weights')
     if weights and weights[0] in problem_specification['predictors']:
@@ -41,66 +54,8 @@ def fit_pipeline(pipeline_specification, train_specification):
     dataframe = dataframe[dataframe[problem_specification['targets']].notnull().all(1)]
 
     if problem_specification['taskType'] == 'FORECASTING':
-        # returns a dict of dataframes, one for each treatment, one observation per time unit
-        dataframe_split = split_time_series(
-            dataframe=dataframe,
-            cross_section_names=problem_specification.get('crossSection', []))
-
-        time = next(iter(problem_specification.get('time', [])), None)
-
-        # targets cannot be exogenous, subset exogenous labels to the predictor set
-        exog_names = [i for i in problem_specification.get('exogenous', []) if
-                      i in problem_specification['predictors'] and
-                      i not in problem_specification.get('crossSection', [])]
-        # print('exog_names', exog_names)
-        # target variables are not transformed, all other variables are transformed
-        endog_non_target_names = [i for i in problem_specification['predictors'] if
-                                  i not in exog_names and i != time and
-                                  i not in problem_specification.get('crossSection', [])]
-        endog_target_names = [i for i in problem_specification['targets'] if i != time]
-
-        dataframes = {}
-        preprocessors = {}
-
-        for treatment_name in dataframe_split:
-            treatment_data = format_dataframe_time_index(
-                dataframe_split[treatment_name],
-                date=time)
-            if exog_names:
-                exog, preprocess_exog = preprocess(
-                    treatment_data[exog_names],
-                    # pipeline_specification['preprocess'],
-                    train_specification,
-                    X=exog_names)
-            else:
-                exog, preprocess_exog = None, None
-
-            if endog_non_target_names:
-                endog_non_target, preprocess_endog = preprocess(
-                    treatment_data[endog_non_target_names],
-                    # pipeline_specification['preprocess'],
-                    train_specification,
-                    X=endog_non_target_names)
-
-                # print(treatment_name)
-                # print(endog_non_target_names)
-                endog = pd.concat([
-                    treatment_data[endog_target_names],
-                    pd.DataFrame(endog_non_target, index=treatment_data.index)],
-                    axis=1)
-            else:
-                endog, preprocess_endog = treatment_data[endog_target_names], None
-
-            dataframes[treatment_name] = {
-                'exogenous': exog,
-                'endogenous': endog,
-                'time': treatment_data.index,
-                'weight': treatment_data[weights[0]] if weights else None
-            }
-            preprocessors[treatment_name] = {
-                'exogenous': preprocess_exog,
-                'endogenous': preprocess_endog
-            }
+        dataframes, preprocessors = fit_forecast_preprocess(dataframe, problem_specification,
+                                                            train_specification, weights)
     else:
         stimulus, preprocessor = fit_preprocess(
             dataframe[problem_specification['predictors']],
@@ -121,6 +76,8 @@ def fit_pipeline(pipeline_specification, train_specification):
     model_specification = pipeline_specification['model']
     model = fit_model(dataframes, model_specification, problem_specification)
 
+    # model_specification['library'] = 'statsmodels'
+
     # 4. wrap and save
     from .model import StatsModelsWrapper, SciKitLearnWrapper
     if model_specification['library'] == 'statsmodels':
@@ -137,6 +94,13 @@ def fit_pipeline(pipeline_specification, train_specification):
             model=model,
             preprocessors=preprocessors)
 
+    # if model_specification['library'] == 'torch':
+    #     return TorchModelsWrapper(
+    #         pipeline_specification=pipeline_specification,
+    #         problem_specification=problem_specification,
+    #         model=model,
+    #         preprocessors=preprocessors)
+
 
 def fit_preprocess(dataframe, preprocess_specification, train_specification):
     # TODO: more varied preprocessing based on preprocess specification
@@ -145,6 +109,68 @@ def fit_preprocess(dataframe, preprocess_specification, train_specification):
     #     pass
     # else:
     #     raise ValueError('Unrecognized preprocess specification')
+
+
+def fit_forecast_preprocess(dataframe, problem_specification, train_specification, weights):
+    # Move the inner block here, so it can be used by ta2_interface
+    # returns a dict of dataframes, one for each treatment, one observation per time unit
+    dataframe_split = split_time_series(
+        dataframe=dataframe,
+        cross_section_names=problem_specification.get('crossSection', []))
+
+    time = next(iter(problem_specification.get('time', [])), None)
+
+    # targets cannot be exogenous, subset exogenous labels to the predictor set
+    exog_names = [i for i in problem_specification.get('exogenous', []) if
+                  i in problem_specification['predictors'] and
+                  i not in problem_specification.get('crossSection', [])]
+    # print('exog_names', exog_names)
+    # target variables are not transformed, all other variables are transformed
+    endog_non_target_names = [i for i in problem_specification['predictors'] if
+                              i not in exog_names and i != time and
+                              i not in problem_specification.get('crossSection', [])]
+    endog_target_names = [i for i in problem_specification['targets'] if i != time]
+
+    dataframes = {}
+    preprocessors = {}
+
+    for treatment_name in dataframe_split:
+        treatment_data = format_dataframe_time_index(
+            dataframe_split[treatment_name],
+            date=time)
+        if exog_names:
+            exog, preprocess_exog = preprocess(
+                treatment_data[exog_names],
+                train_specification,
+                X=exog_names)
+        else:
+            exog, preprocess_exog = None, None
+
+        if endog_non_target_names:
+            endog_non_target, preprocess_endog = preprocess(
+                treatment_data[endog_non_target_names],
+                train_specification,
+                X=endog_non_target_names)
+
+            endog = pd.concat([
+                treatment_data[endog_target_names],
+                pd.DataFrame(endog_non_target, index=treatment_data.index)],
+                axis=1)
+        else:
+            endog, preprocess_endog = treatment_data[endog_target_names], None
+
+        dataframes[treatment_name] = {
+            'exogenous': exog,
+            'endogenous': endog,
+            'time': treatment_data.index,
+            'weight': treatment_data[weights[0]] if weights else None
+        }
+        preprocessors[treatment_name] = {
+            'exogenous': preprocess_exog,
+            'endogenous': preprocess_endog
+        }
+
+    return dataframes, preprocessors
 
 
 def fit_model(dataframes, model_specification, problem_specification, start_params=None):
@@ -158,6 +184,8 @@ def fit_model(dataframes, model_specification, problem_specification, start_para
 
     return {
         'AR': fit_model_ar,
+        'AR_NN': fit_model_ar_ann,
+        'VAR_NN': fit_model_var_ann,
         'VAR': fit_model_var,
         'SARIMAX': fit_model_sarimax,
         'ORDINARY_LEAST_SQUARES': factory_fit_model_sklearn(LinearRegression),
@@ -370,3 +398,110 @@ def factory_fit_model_sklearn(sklearn_class):
                 list(inspect.signature(sklearn_class.fit).parameters.keys())))
         return model
     return fit_model
+
+
+def fit_model_ar_ann(dataframes, model_specification, problem_specification):
+    """
+    Return a fitted autoregression neural network model
+    @param dataframes: ordered by time index
+    @param model_specification: {'lags': int, ...}
+    @param problem_specification:
+    """
+    # 'Y' variable is in the first column, AR only requires 'Y' value
+    time = next(iter(problem_specification.get('time', [])), None)
+    back_steps = model_specification.get('back_steps', 1)  # At least 1 time step is required
+    loss_func = problem_specification.get('performanceMetric').get('metric')
+    loss_func = 'MEAN_SQUARED_ERROR' if (not loss_func or loss_func not in _LOSS_FUNCTIONS) else loss_func
+    models = dict()
+
+    for treatment_name in dataframes:
+        treatment_data = dataframes[treatment_name]
+        if time is None:
+            problem_specification['time'] = treatment_data['time'].name
+
+        # Only considering endogenous features now
+        if treatment_data['exogenous']:
+            print('Exogenous features will not be considered now.')
+
+        container = treatment_data['endogenous'].astype(float)
+        tgt_name = container.columns[0]
+        y_column = container[tgt_name]
+        tmp_block = container.drop(columns=[tgt_name])
+        history_points = y_column.tail(back_steps)
+
+        tgt_y, tgt_x = y_column, tmp_block
+
+        # Build training matrix, can be moved to a new auxiliary function
+        for step in range(1, back_steps + 1):
+            tgt_y = tgt_y.drop(tgt_y.index[0])
+            tmp_x = container.shift(step)
+            tmp_x.columns = ['{}_minus_{}'.format(col, step) for col in tmp_x.columns]
+            tgt_x = pd.concat((tgt_x, tmp_x), axis=1)
+
+        train_x, train_y = tgt_x.dropna(), tgt_y.dropna()
+
+        from .nn_models.NlayerMLP import ModMLPForecaster
+
+        # Training model for current df
+        model = ModMLPForecaster(loss=_LOSS_FUNCTIONS[loss_func])
+        model.fit(train_x, train_y)
+
+        # history points should be stored for future reference
+        model.set_history(history_points)
+
+        models[treatment_name] = model
+
+    return models
+
+
+def fit_model_var_ann(dataframes, model_specification, problem_specification):
+    """
+    Return a fitted autoregression model
+    @param dataframes:
+    @param model_specification: {'lags': int, ...}
+    @param problem_specification:
+    """
+    # Assume the dataframes is already in order
+    # 'Y' variable is in the first column, AR only requires 'Y' value
+    time = next(iter(problem_specification.get('time', [])), None)
+    back_steps = model_specification.get('back_steps', 1)  # At least 1 time step is required
+    loss_func = problem_specification.get('performanceMetric').get('metric')
+    loss_func = 'MEAN_SQUARED_ERROR' if (not loss_func or loss_func not in _LOSS_FUNCTIONS) else loss_func
+
+    models = dict()
+
+    for treatment_name in dataframes:
+        treatment_data = dataframes[treatment_name]
+        if time is None:
+            problem_specification['time'] = treatment_data['time'].name
+
+        # Only considering endogenous features now
+        if treatment_data['exogenous']:
+            print('Exogenous features will not be considered now.')
+
+        container = treatment_data['endogenous'].astype(float)
+        y_column = container  # Predict Y, X1, X2 ... simultaneously
+        tmp_block = pd.DataFrame()
+        history_points = y_column.tail(back_steps)
+
+        tgt_y, tgt_x = y_column, tmp_block
+
+        for step in range(1, back_steps + 1):
+            tgt_y = tgt_y.drop(tgt_y.index[0])
+            tmp_x = container.shift(step)
+            tmp_x.columns = ['{}_minus_{}'.format(col, step) for col in tmp_x.columns]
+            tgt_x = pd.concat((tgt_x, tmp_x), axis=1)
+
+        train_x, train_y = tgt_x.dropna(), tgt_y.dropna()
+
+        from .nn_models.NlayerMLP import ModMLPForecaster
+
+        # Training model for current df
+        model = ModMLPForecaster(loss=_LOSS_FUNCTIONS[loss_func])
+        model.fit(train_x, train_y)
+
+        model.set_history(history_points)
+
+        models[treatment_name] = model
+
+    return models

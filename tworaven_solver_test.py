@@ -13,7 +13,8 @@ problems = {
         'pipeline_specification': {
             'preprocess': None,
             'model': {
-                'strategy': 'SARIMAX'
+                # 'strategy': 'SARIMAX'
+                'strategy': 'AR_NN'
             }
         },
         'train_specification': {
@@ -25,8 +26,30 @@ problems = {
             },
             "input": {
                 "name": "in-sample",
-                "resource_uri": "file://" + '/home/shoe/TwoRavens/dev_scripts/time_series_data/shampoo.csv'
+                "resource_uri": "file://" + '/ravens_volume/test_data/TR_TS_shampoo/TRAIN/dataset_TRAIN/tables/learningData.csv'
+            },
+            "performanceMetric": "rootMeanSquaredError",  # meanSquareError | meanAbsoluteError
+        }
+    },
+    'sunspots': {
+        'pipeline_specification': {
+            'preprocess': None,
+            'model': {
+                'strategy': 'AR_NN'
             }
+        },
+        'train_specification': {
+            "problem": {
+                "taskType": "FORECASTING",
+                "predictors": [],
+                "targets": ['sunspots'],
+                "time": ["year-month"]
+            },
+            "input": {
+                "name": "in-sample",
+                "resource_uri": "file://" + '/ravens_volume/test_data/56_sunspots_monthly/TRAIN/dataset_TRAIN/tables/learningData.csv'
+            },
+            "performanceMetric": "meanSquaredError"
         }
     },
     'appliance': {
@@ -46,7 +69,8 @@ problems = {
             "input": {
                 "name": "in-sample",
                 "resource_uri": "file://" + '/ravens_volume/test_data/TR_TS_appliance/TRAIN/dataset_TRAIN/tables/learningData.csv'
-            }
+            },
+            "performanceMetric": "meanSquaredError"
         }
     },
     'baseball': {
@@ -111,16 +135,34 @@ problems = {
     }
 }
 
-problem = problems['baseball-regression']
-model = tworaven_solver.fit_pipeline(**problem)
+# Only support for time series forecasting
+
+from tworaven_solver.search import SearchManager
+
+problem = problems['sunspots']
+pip_spe, train_spe = problem['pipeline_specification'], problem['train_specification']
+search_manager = SearchManager(None, train_spe['problem'])
+new_pip = search_manager.get_pipeline_specification()
+# print(new_pip)
+
+while new_pip["model"]['strategy'] != "SARIMAX":
+    new_pip = search_manager.get_pipeline_specification()
+
+model = tworaven_solver.fit_pipeline(new_pip, train_spe)
+
 
 dataframe = pd.read_csv(problem['train_specification']['input']['resource_uri'].replace('file://', ''))
 
+# res = model.forecast(dataframe)
+res = model.predict(dataframe)
+print(res)
+
+
 # end = model.model.model._index[-1]
 # start = model.model.model._index[0]
-
+#
 # model.model.plot_forecast()
-
+#
 # import matplotlib.pyplot as plt
 #
 # plt.show()
