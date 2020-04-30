@@ -93,6 +93,13 @@ The signature of it is:
 
 **fit_pipeline**(Dict: *pipeline_specification*, Dict *train_specification*) -> ModelWrapper: *output_model*
 
+The code in [fit.py](fit.py) is well commented and easy to follow, please refer to the source for more details.
+Nevertheless, we still provide the simple workflow below:
+
+* Read data source file based on *train_specification*
+* Preprocess the data, also based on the configuration in the *train_specification*
+* Fit the model using different fit function
+* Wrap and return the fitted model
 
 # Note for developer
 
