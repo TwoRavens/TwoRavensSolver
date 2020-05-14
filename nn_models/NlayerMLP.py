@@ -6,6 +6,7 @@ from sklearn.utils import check_X_y, column_or_1d
 from sklearn.utils.validation import check_is_fitted
 
 import numpy as np
+import pandas as pd
 import copy
 
 NEW_LOSS_FUNCTIONS = copy.copy(LOSS_FUNCTIONS)
@@ -158,7 +159,7 @@ class ModMLPForecaster(RegressorMixin, ModBaseMLP):
                  verbose=False, warm_start=False, momentum=0.9,
                  nesterovs_momentum=True, early_stopping=False,
                  validation_fraction=0.1, beta_1=0.9, beta_2=0.999,
-                 epsilon=1e-8, n_iter_no_change=10, loss='squared_loss'):
+                 epsilon=1e-8, n_iter_no_change=10, loss='squared_loss', num_tgt=1):
         super().__init__(
             hidden_layer_sizes=hidden_layer_sizes,
             activation=activation, solver=solver, alpha=alpha,
@@ -174,6 +175,8 @@ class ModMLPForecaster(RegressorMixin, ModBaseMLP):
             n_iter_no_change=n_iter_no_change)
         self.history = None
         self.back_step, self.length_per_point = -1, -1
+        self._index = None
+        self.num_tgt = num_tgt
 
     def predict(self, X):
         """Predict using the multi-layer perceptron model.
@@ -192,7 +195,7 @@ class ModMLPForecaster(RegressorMixin, ModBaseMLP):
             return y_pred.ravel()
         return y_pred
 
-    def forecast(self, X, steps):
+    def forecast(self, X, steps, real_value=False):
         """Forecast k-steps ahead using fiited MLP model.
         Parameters
         ----------
@@ -200,6 +203,8 @@ class ModMLPForecaster(RegressorMixin, ModBaseMLP):
             The input data. -- Not necessary
 
         steps : Integer, number of steps forecast ahead
+        real_value : Boolean, flag of the execution mode, True for prediction using real value  (train split)
+
         Returns
         -------
         y : ndarray of shape (n_samples, n_outputs)
@@ -207,13 +212,27 @@ class ModMLPForecaster(RegressorMixin, ModBaseMLP):
         """
         check_is_fitted(self, "coefs_")
         res = list()
-        current_input = self.history
-        for s in range(steps):
-            tmp_pred = self._predict(current_input.reshape(1, -1))
-            res.append(tmp_pred.item(0))
-            current_input = np.concatenate((tmp_pred, current_input), axis=None)[:-self.length_per_point]
 
-        return np.asarray(res)
+        # Current input seems unfair in the real_value model
+        current_input = self.history
+        if not real_value:
+            for s in range(steps):
+                tmp_pred = self._predict(current_input.reshape(1, -1))
+                res.append([tmp_pred.item(i) for i in range(self.num_tgt)])
+                current_input = np.concatenate((tmp_pred, current_input), axis=None)[:-self.length_per_point]
+        else:
+            if isinstance(X, pd.DataFrame):
+                X = X.astype(float).to_numpy()
+
+            for s in range(X.shape[0]):
+                tmp_pred = self._predict(current_input.reshape(1, -1))
+                res.append([tmp_pred.item(i) for i in range(self.num_tgt)])
+                current_input = np.concatenate((X[s], current_input), axis=None)[:-self.length_per_point]
+
+        res = np.asarray(res)
+        if res.shape[1] == 1:
+            return res.ravel()
+        return res
 
     def _validate_input(self, X, y, incremental):
         X, y = check_X_y(X, y, accept_sparse=['csr', 'csc', 'coo'],
@@ -222,8 +241,9 @@ class ModMLPForecaster(RegressorMixin, ModBaseMLP):
             y = column_or_1d(y, warn=True)
         return X, y
 
-    def set_history(self, data):
+    def set_history(self, data, index):
         self.history = data.to_numpy()  # Ndarray
         self.back_step = self.history.shape[0]
         self.history = self.history.flatten()
         self.length_per_point = self.history.shape[0] // self.back_step
+        self._index = index
