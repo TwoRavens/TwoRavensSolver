@@ -5,7 +5,7 @@ import warnings
 import joblib
 # import torch
 
-from .utilities import split_time_series, format_dataframe_time_index, filter_args
+from .utilities import split_time_series, format_dataframe_time_index, filter_args, format_dataframe_order_index
 from .fit import fit_forecast_preprocess
 
 from statsmodels.tsa.ar_model import ARResultsWrapper
@@ -109,7 +109,7 @@ class SciKitLearnWrapper(BaseModelWrapper):
         return self.model.predict_proba(dataframe)
 
     def forecast(self, dataframe):
-        # Follow the same code in statsmodel Wrapper -- the length of input dataframe is the length of forecast range
+        # The length of input dataframe equals to the forecastingHorizon
         cross_section_names = self.problem_specification.get('crossSection', [])
         time_name = next(iter(self.problem_specification.get('time', [])), None)
         index_names = self.problem_specification.get('indexes', ['d3mIndex'])
@@ -129,12 +129,20 @@ class SciKitLearnWrapper(BaseModelWrapper):
             model = self.model[treatment_name]
 
             # Inherits frequency information from training data
-            treatment = format_dataframe_time_index(
+            # treatment = format_dataframe_time_index(
+            #     treatment,
+            #     date=time_name,
+            #     granularity_specification=self.problem_specification.get('timeGranularity'),
+            #     freq=model._index.freq)
+            #     # freq=None)
+
+            treatment, _ = format_dataframe_order_index(
                 treatment,
-                date=time_name,
-                granularity_specification=self.problem_specification.get('timeGranularity'),
-                freq=model._index.freq)
-                # freq=None)
+                is_date=self.problem_specification['is_temporal'],
+                date_format=self.problem_specification['date_format'],
+                order_column=time_name,
+                freq=model._index.freq
+            )
 
             # After we create the time_index dataframe, the date_index should be pd.dateTimeIndex
             index, date_index = treatment[index_names], treatment.index
@@ -347,11 +355,20 @@ class StatsModelsWrapper(BaseModelWrapper):
                 continue
             model = self.model[treatment_name]
 
-            treatment = format_dataframe_time_index(
+            # treatment = format_dataframe_time_index(
+            #     treatment,
+            #     date=time_name,
+            #     granularity_specification=self.problem_specification.get('timeGranularity'),
+            #     freq=model.model._index.freq)
+
+            treatment, _ = format_dataframe_order_index(
                 treatment,
-                date=time_name,
-                granularity_specification=self.problem_specification.get('timeGranularity'),
-                freq=model.model._index.freq)
+                order_column=time_name,
+                is_date=self.problem_specification['is_temporal'],
+                date_format=self.problem_specification['date_format'],
+                freq=model.model._index.freq
+            )
+
             treatment.reset_index(inplace=True)
 
             start = treatment[time_name].iloc[0]

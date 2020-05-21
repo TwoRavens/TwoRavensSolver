@@ -4,6 +4,7 @@ from .utilities import (
     filter_args,
     get_freq,
     format_dataframe_time_index,
+    format_dataframe_order_index,
     split_time_series
 )
 
@@ -41,6 +42,10 @@ def fit_pipeline(pipeline_specification, train_specification):
     # Add performanceMetric into train_specification
     loss_name = train_specification.get("performanceMetric", {'metric': "MEAN_SQUARED_ERROR"})
     problem_specification['performanceMetric'] = loss_name
+
+    # Test code for dummy preprocessor return
+    problem_specification['is_temporal'] = True
+    problem_specification['date_format'] = '%Y-%m'
 
     weights = problem_specification.get('weights')
     if weights and weights[0] in problem_specification['predictors']:
@@ -135,9 +140,15 @@ def fit_forecast_preprocess(dataframe, problem_specification, train_specificatio
     preprocessors = {}
 
     for treatment_name in dataframe_split:
-        treatment_data = format_dataframe_time_index(
+        # treatment_data = format_dataframe_time_index(
+        #     dataframe_split[treatment_name],
+        #     date=time)
+        treatment_data, mapping_dic = format_dataframe_order_index(
             dataframe_split[treatment_name],
-            date=time)
+            is_date=problem_specification['is_temporal'],
+            date_format=problem_specification['date_format'],
+            order_column=time
+        )
         if exog_names:
             exog, preprocess_exog = preprocess(
                 treatment_data[exog_names],
@@ -164,7 +175,8 @@ def fit_forecast_preprocess(dataframe, problem_specification, train_specificatio
             'endogenous': endog,
             'time': treatment_data.index,
             'weight': treatment_data[weights[0]] if weights else None,
-            'tgt_names': endog_target_names
+            'tgt_names': endog_target_names,
+            'index_mapping': mapping_dic
         }
         preprocessors[treatment_name] = {
             'exogenous': preprocess_exog,
@@ -452,7 +464,7 @@ def fit_model_ar_ann(dataframes, model_specification, problem_specification):
         model = ModMLPForecaster(loss=_LOSS_FUNCTIONS[loss_func])
         model.fit(train_x, train_y)
 
-        # history points should be stored for future reference
+        # history points should be stored for future inference
         model.set_history(history_points, treatment_data['time'])
 
         models[treatment_name] = model
