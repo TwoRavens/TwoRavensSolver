@@ -44,8 +44,10 @@ def fit_pipeline(pipeline_specification, train_specification):
     problem_specification['performanceMetric'] = loss_name
 
     # Test code for dummy preprocessor return
-    problem_specification['is_temporal'] = True
-    problem_specification['date_format'] = '%Y-%m'
+    if 'is_temproal' not in problem_specification:
+        problem_specification['is_temporal'] = True
+    if 'data_format' not in problem_specification:
+        problem_specification['date_format'] = None
 
     weights = problem_specification.get('weights')
     if weights and weights[0] in problem_specification['predictors']:

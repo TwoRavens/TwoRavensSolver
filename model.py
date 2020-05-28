@@ -108,7 +108,7 @@ class SciKitLearnWrapper(BaseModelWrapper):
                 index=dataframe.index)
         return self.model.predict_proba(dataframe)
 
-    def forecast(self, dataframe):
+    def forecast(self, dataframe, split_mode='test'):
         # The length of input dataframe equals to the forecastingHorizon
         cross_section_names = self.problem_specification.get('crossSection', [])
         time_name = next(iter(self.problem_specification.get('time', [])), None)
@@ -128,14 +128,6 @@ class SciKitLearnWrapper(BaseModelWrapper):
                 continue
             model = self.model[treatment_name]
 
-            # Inherits frequency information from training data
-            # treatment = format_dataframe_time_index(
-            #     treatment,
-            #     date=time_name,
-            #     granularity_specification=self.problem_specification.get('timeGranularity'),
-            #     freq=model._index.freq)
-            #     # freq=None)
-
             treatment, _ = format_dataframe_order_index(
                 treatment,
                 is_date=self.problem_specification['is_temporal'],
@@ -150,6 +142,7 @@ class SciKitLearnWrapper(BaseModelWrapper):
             index.reset_index(drop=True, inplace=True)
             start_time, end_time = date_index[0], date_index[-1]
             model_end_time = model._index[-1]
+            dataframe_len, history_len = len(treatment.index), len(model._index)
 
             if self.pipeline_specification['model']['strategy'].endswith('_NN'):
                 # May contains some issues -- corner cases
@@ -160,11 +153,22 @@ class SciKitLearnWrapper(BaseModelWrapper):
                         columns=self.problem_specification['targets'],
                         index=date_index)
                 else:
-                    # TRAIN SPLIT
-                    predict = pd.DataFrame(
-                        data=model.forecast(treatment, len(treatment.index), real_value=True),
-                        columns=self.problem_specification['targets'],
-                        index=date_index)
+                    # TRAIN SPLIT --May include 'all' split
+                    if dataframe_len > history_len:
+                        train_part = model.forecast(treatment.head(history_len), history_len, real_value=True)
+                        test_part = model.forecast(treatment.tail(dataframe_len - history_len),
+                                                   dataframe_len - history_len,
+                                                   real_value=False)
+                        predict = pd.DataFrame(
+                            data=np.concatenate((train_part, test_part), axis=0),
+                            columns=self.problem_specification['targets'],
+                            index=date_index
+                        )
+                    else:
+                        predict = pd.DataFrame(
+                            data=model.forecast(treatment, len(treatment.index), real_value=True),
+                            columns=self.problem_specification['targets'],
+                            index=date_index)
 
             if self.pipeline_specification['model']['strategy'].startswith('TRA_'):
                 length = len(treatment.index)
@@ -187,10 +191,17 @@ class SciKitLearnWrapper(BaseModelWrapper):
                         for factor in range(length):
                             data[factor] += slop * (1 + factor)
                     else:
-                        # TRAIN SPLIT - the last point should be pivot
-                        for factor in range(length-1, -1, -1):
-                            data[factor] -= slop * (length - factor - 1)
-                        pass
+                        # TRAIN SPLIT
+                        if dataframe_len > history_len:
+                            for factor in range(history_len-1, -1, -1):
+                                data[factor] -= slop * (history_len - factor - 1)
+                            # data[history_len] should be the pivot itself
+                            for factor in range(history_len, dataframe_len):
+                                data[factor] += slop * (factor - history_len + 1)
+                        else:
+                            # The last point should be the pivot
+                            for factor in range(length-1, -1, -1):
+                                data[factor] -= slop * (length - factor - 1)
                 else:
                     raise NotImplementedError('Unsupported method {} detected'.format(model['method']))
 
@@ -480,7 +491,7 @@ class StatsModelsWrapper(BaseModelWrapper):
         predictions.reset_index(drop=True, inplace=True)
         return predictions
 
-    def forecast(self, dataframe):
+    def forecast(self, dataframe, split_mode='test'):
         return self.predict(dataframe)
 
     def refit(self, dataframe=None, data_specification=None):

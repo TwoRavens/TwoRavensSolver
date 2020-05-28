@@ -39,7 +39,6 @@ def format_dataframe_time_index(dataframe, date=None, granularity_specification=
             try:
                 dataframe[date] = dataframe[date].astype(str).apply(parser.parse)
                 # not flexible enough
-                # dataframe[date] = pd.to_datetime(dataframe[date], infer_datetime_format=True)
                 return resample_dataframe_time_index(
                     dataframe=dataframe,
                     date=date,
@@ -48,13 +47,23 @@ def format_dataframe_time_index(dataframe, date=None, granularity_specification=
                 pass
         else:
             try:
+                # Trying to parse the input string with given format
                 dataframe[date] = dataframe[date].astype(str).apply(lambda x: get_date(x, date_format))
                 return resample_dataframe_time_index(
                     dataframe=dataframe,
                     date=date,
                     freq=freq or get_freq(granularity_specification=granularity_specification))
             except ValueError:
-                pass
+                # Fall back to no format version
+                try:
+                    dataframe[date] = dataframe[date].astype(str).apply(parser.parse)
+                    # not flexible enough
+                    return resample_dataframe_time_index(
+                        dataframe=dataframe,
+                        date=date,
+                        freq=freq or get_freq(granularity_specification=granularity_specification))
+                except ValueError:
+                    pass
 
     # if there was a spec, but no valid date column to apply it to, then ignore it
     dataframe[date] = pd.date_range('1900-1-1', periods=len(dataframe), freq='D')
