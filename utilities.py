@@ -14,34 +14,128 @@ def filter_args(arguments, intersect):
     return {k: arguments[k] for k in intersect if k in arguments}
 
 
-def format_dataframe_time_index(dataframe, date=None, granularity_specification=None, freq=None):
+def format_dataframe_time_index(dataframe, date=None, granularity_specification=None, freq=None, date_format=None):
     """
     Ensure dataframe index is of type pd.DatetimeIndex on the date column
     @param dataframe: arbitrarily indexed dataframe
     @param date: optional column name to turn into date index
     @param granularity_specification: freq in d3m format
     """
+
+    # Sanity check
+    if date is None and date_format:
+        raise ValueError('date_format must be None when date is None')
+
+    # Create dummy date index if date is not given
     if date is None:
         date = 'ravensDateIndex'
         while date in dataframe:
             date += '_'
 
-    # attempt to parse given date column
+    # Attempt to parse given date column
     if date in dataframe:
-        try:
-            dataframe[date] = dataframe[date].astype(str).apply(parser.parse)
-            # not flexible enough
-            # dataframe[date] = pd.to_datetime(dataframe[date], infer_datetime_format=True)
-            return resample_dataframe_time_index(
-                dataframe=dataframe,
-                date=date,
-                freq=freq or get_freq(granularity_specification=granularity_specification))
-        except ValueError:
-            pass
+        # Date format is not available from the preprocessor
+        if not date_format:
+            try:
+                dataframe[date] = dataframe[date].astype(str).apply(parser.parse)
+                # not flexible enough
+                return resample_dataframe_time_index(
+                    dataframe=dataframe,
+                    date=date,
+                    freq=freq or get_freq(granularity_specification=granularity_specification))
+            except ValueError:
+                pass
+        else:
+            try:
+                # Trying to parse the input string with given format
+                dataframe[date] = dataframe[date].astype(str).apply(lambda x: get_date(x, date_format))
+                return resample_dataframe_time_index(
+                    dataframe=dataframe,
+                    date=date,
+                    freq=freq or get_freq(granularity_specification=granularity_specification))
+            except ValueError:
+                # Fall back to no format version
+                try:
+                    dataframe[date] = dataframe[date].astype(str).apply(parser.parse)
+                    # not flexible enough
+                    return resample_dataframe_time_index(
+                        dataframe=dataframe,
+                        date=date,
+                        freq=freq or get_freq(granularity_specification=granularity_specification))
+                except ValueError:
+                    pass
 
     # if there was a spec, but no valid date column to apply it to, then ignore it
     dataframe[date] = pd.date_range('1900-1-1', periods=len(dataframe), freq='D')
     return dataframe.set_index(date)
+
+
+# New function for general ordered dataframe
+def format_dataframe_order_index(dataframe, order_column=None, is_date=True, date_format=None,
+                                 granularity_specification=None, freq=None, start_dummy='1900-1-1'):
+    """
+    Ensure dataframe index is of type pd.DatetimeIndex (if is_date is True) on the date column
+    Otherwise, the index is of type pd.RangeIndex -- Only numerical value is supported
+
+    @param dataframe: arbitrarily indexed dataframe
+    @param order_column: optional column name to turn into date index
+    @param is_date: boolean flag that denotes the index type
+    @param date_format: date format from 2ravens_preprocessor
+    @param granularity_specification: freq in d3m format
+    @param freq: frequency for the given column, optional
+    @param start_dummy: the start date of dummy index,
+    """
+
+    # Sanity check
+    if order_column is None and date_format:
+        raise ValueError('date_format must be None when date is None')
+
+    # Create dummy date index if date is not given -- treated as
+    if order_column is None:
+        order_column = 'ravensDateIndex'
+        while order_column in dataframe:
+            order_column += '_'
+
+    # Attempt to parse given date column
+    if order_column in dataframe:
+        if is_date:
+            # Try parse the dateTimeIndex using given format first
+            if date_format:
+                try:
+                    dataframe[order_column] = dataframe[order_column].astype(str).apply(
+                        lambda x: get_date(x, date_format))
+                    return resample_dataframe_time_index(
+                        dataframe=dataframe,
+                        date=order_column,
+                        freq=freq or get_freq(granularity_specification=granularity_specification)
+                    ), None
+                except ValueError:
+                    pass
+
+            # Guess the dateTimeIndex if format is not given, or parse failed with given format
+            try:
+                dataframe[order_column] = dataframe[order_column].astype(str).apply(parser.parse)
+                return resample_dataframe_time_index(
+                    dataframe=dataframe,
+                    date=order_column,
+                    freq=freq or get_freq(granularity_specification=granularity_specification)), None
+            except ValueError:
+                pass
+
+    # if there was a spec, but no valid date column to apply it to, then ignore it
+    mapping_dic = {
+        'start': [dataframe[order_column][0], dataframe[order_column[0]]],
+        'end': [dataframe[order_column][-1], dataframe[order_column][-1]]}
+
+    dataframe[order_column] = pd.date_range(start_dummy, periods=len(dataframe), freq='D')
+
+    if not is_date:
+        # Return a mapping dic if the index is some sequential list
+        mapping_dic['start'][1] = dataframe[order_column][0]
+        mapping_dic['end'][1] = dataframe[order_column[-1]]
+        return dataframe.set_index(order_column), mapping_dic
+
+    return dataframe.set_index(order_column), None
 
 
 def resample_dataframe_time_index(dataframe, date, freq=None):
@@ -55,7 +149,7 @@ def resample_dataframe_time_index(dataframe, date, freq=None):
     temporal_series = dataframe[date]
     estimated_freq = get_freq(series=temporal_series)
 
-    # fall back to linspace if data is completely irregular
+    # fall back to line-space if data is completely irregular
     if temporal_series is not None and not estimated_freq:
         estimated_freq = (temporal_series.iloc[-1] - temporal_series.iloc[0]) / len(dataframe)
 
@@ -147,7 +241,6 @@ def get_date(value, time_format=None):
     try:
         return datetime.strptime(value, time_format) if time_format else parser.parse(str(value))
     except (parser._parser.ParserError, ValueError):
-        # ignore if could not be parsed
         pass
 
 # otherwise take the shortest date offset

@@ -4,6 +4,7 @@ from .utilities import (
     filter_args,
     get_freq,
     format_dataframe_time_index,
+    format_dataframe_order_index,
     split_time_series
 )
 
@@ -41,6 +42,12 @@ def fit_pipeline(pipeline_specification, train_specification):
     # Add performanceMetric into train_specification
     loss_name = train_specification.get("performanceMetric", {'metric': "MEAN_SQUARED_ERROR"})
     problem_specification['performanceMetric'] = loss_name
+
+    # Test code for dummy preprocessor return
+    if 'is_temproal' not in problem_specification:
+        problem_specification['is_temporal'] = True
+    if 'data_format' not in problem_specification:
+        problem_specification['date_format'] = None
 
     weights = problem_specification.get('weights')
     if weights and weights[0] in problem_specification['predictors']:
@@ -135,9 +142,15 @@ def fit_forecast_preprocess(dataframe, problem_specification, train_specificatio
     preprocessors = {}
 
     for treatment_name in dataframe_split:
-        treatment_data = format_dataframe_time_index(
+        # treatment_data = format_dataframe_time_index(
+        #     dataframe_split[treatment_name],
+        #     date=time)
+        treatment_data, mapping_dic = format_dataframe_order_index(
             dataframe_split[treatment_name],
-            date=time)
+            is_date=problem_specification['is_temporal'],
+            date_format=problem_specification['date_format'],
+            order_column=time
+        )
         if exog_names:
             exog, preprocess_exog = preprocess(
                 treatment_data[exog_names],
@@ -163,7 +176,9 @@ def fit_forecast_preprocess(dataframe, problem_specification, train_specificatio
             'exogenous': exog,
             'endogenous': endog,
             'time': treatment_data.index,
-            'weight': treatment_data[weights[0]] if weights else None
+            'weight': treatment_data[weights[0]] if weights else None,
+            'tgt_names': endog_target_names,
+            'index_mapping': mapping_dic
         }
         preprocessors[treatment_name] = {
             'exogenous': preprocess_exog,
@@ -180,8 +195,10 @@ def fit_model(dataframes, model_specification, problem_specification, start_para
             **model_specification
         }
 
-
-
+    temp_key = model_specification['strategy']
+    if temp_key.startswith('SARIMAX'):
+        temp_key = 'SARIMAX'
+        
     return {
         'AR': fit_model_ar,
         'AR_NN': fit_model_ar_ann,
@@ -214,7 +231,10 @@ def fit_model(dataframes, model_specification, problem_specification, start_para
         "MULTINOMIAL_NAIVE_BAYES": factory_fit_model_sklearn(MultinomialNB),
         "GAUSSIAN_NAIVE_BAYES": factory_fit_model_sklearn(GaussianNB),
         "COMPLEMENT_NAIVE_BAYES": factory_fit_model_sklearn(ComplementNB),
-    }[model_specification['strategy']](dataframes, model_specification, problem_specification)
+        "TRA_AVERAGE": factory_fit_traditional("AVERAGE"),
+        "TRA_NAIVE": factory_fit_traditional("NAIVE"),
+        "TRA_DRIFT": factory_fit_traditional("DRIFT"),
+    }[temp_key](dataframes, model_specification, problem_specification)
 
 
 def fit_model_ar(dataframes, model_specification, problem_specification):
@@ -446,8 +466,8 @@ def fit_model_ar_ann(dataframes, model_specification, problem_specification):
         model = ModMLPForecaster(loss=_LOSS_FUNCTIONS[loss_func])
         model.fit(train_x, train_y)
 
-        # history points should be stored for future reference
-        model.set_history(history_points)
+        # history points should be stored for future inference
+        model.set_history(history_points, treatment_data['time'])
 
         models[treatment_name] = model
 
@@ -497,11 +517,74 @@ def fit_model_var_ann(dataframes, model_specification, problem_specification):
         from .nn_models.NlayerMLP import ModMLPForecaster
 
         # Training model for current df
-        model = ModMLPForecaster(loss=_LOSS_FUNCTIONS[loss_func])
+        model = ModMLPForecaster(loss=_LOSS_FUNCTIONS[loss_func], num_tgt=len(treatment_data['tgt_names']))
         model.fit(train_x, train_y)
 
-        model.set_history(history_points)
+        model.set_history(history_points, treatment_data['time'])
 
         models[treatment_name] = model
 
     return models
+
+
+class DummyTra(object):
+    # Dummy class that hold the information of traditional methods
+    def __init__(self, method=None, value=None, num_tgt=1):
+        self.method, self.value = method, value
+        # Index object that should be pd.DateTimeIndex or ...
+        self._index = None
+        self.num_tgt = num_tgt
+    pass
+
+
+def factory_fit_traditional(method_name):
+    """
+    Return a function that will fit the provided class
+
+    @param dataframes:
+    @param model_specification:
+    @param problem_specification:
+    """
+
+    def fit_model(dataframes, model_specification, problem_specification):
+        """
+        Return a fitted model -- Seems only an scalar will do the job
+
+        @param dataframes:
+        @param model_specification:
+        @param problem_specification:
+        """
+        time = next(iter(problem_specification.get('time', [])), None)
+        models = dict()
+
+        for treatment_name in dataframes:
+            treatment_data = dataframes[treatment_name]
+            if time is None:
+                problem_specification['time'] = treatment_data['time'].name
+
+            # Only considering endogenous features now
+            if treatment_data['exogenous']:
+                print('Exogenous features will not be considered now.')
+
+            container = treatment_data['endogenous'][treatment_data['tgt_names']].astype(float)
+
+            # Traditional method won't use any non-tgt features
+            model = DummyTra(method_name, num_tgt=len(treatment_data['tgt_names']))
+            model._index = treatment_data['time']
+
+            if "AVERAGE" == method_name:
+                # Naive approach, stores the average of observations
+                tmp = container.to_numpy()
+                model.value = np.mean(tmp, axis=0).reshape(1, -1)
+            elif "NAIVE" == method_name:
+                # Naive approach, get last history
+                model.value = container.tail(1).to_numpy().reshape(1, -1)
+            elif "DRIFT" == method_name:
+                t1, t2 = container.head(1).to_numpy(), container.tail(1).to_numpy()
+                gap = len(container.index)
+                model.value = {'slope': (t2 - t1) / float(gap), 'pivot': t2}
+
+            models[treatment_name] = model
+
+        return models
+    return fit_model

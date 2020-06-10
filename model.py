@@ -5,7 +5,7 @@ import warnings
 import joblib
 # import torch
 
-from .utilities import split_time_series, format_dataframe_time_index, filter_args
+from .utilities import split_time_series, format_dataframe_time_index, filter_args, format_dataframe_order_index
 from .fit import fit_forecast_preprocess
 
 from statsmodels.tsa.ar_model import ARResultsWrapper
@@ -108,24 +108,8 @@ class SciKitLearnWrapper(BaseModelWrapper):
                 index=dataframe.index)
         return self.model.predict_proba(dataframe)
 
-    def forecast(self, dataframe):
-        # tmp_problem_specification = self.problem_specification
-        #
-        # weights = tmp_problem_specification.get('weights')
-        # if weights and weights[0] in tmp_problem_specification['predictors']:
-        #     tmp_problem_specification['predictors'].remove(weights[0])
-        #
-        # times = tmp_problem_specification.get('time')
-        # if times and times[0] in tmp_problem_specification['predictors']:
-        #     tmp_problem_specification['predictors'].remove(times[0])
-        #
-        # dummy_train_specfication = {'problem': tmp_problem_specification}
-        #
-        # dataframe = dataframe[dataframe[tmp_problem_specification['targets']].notnull().all(1)]
-        #
-        # dataframes, preprocessors = fit_forecast_preprocess(dataframe, tmp_problem_specification,
-        #                                                     dummy_train_specfication, weights)
-
+    def forecast(self, dataframe, split_mode='test'):
+        # The length of input dataframe equals to the forecastingHorizon
         cross_section_names = self.problem_specification.get('crossSection', [])
         time_name = next(iter(self.problem_specification.get('time', [])), None)
         index_names = self.problem_specification.get('indexes', ['d3mIndex'])
@@ -135,8 +119,6 @@ class SciKitLearnWrapper(BaseModelWrapper):
         predictions = []
         predict = None
 
-        # print(list(treatments_data.keys())[:10])
-        # print(list(self.model.keys())[:10])
         for treatment_name in treatments_data:
             treatment = treatments_data[treatment_name]
             if type(treatment_name) is not tuple:
@@ -146,26 +128,87 @@ class SciKitLearnWrapper(BaseModelWrapper):
                 continue
             model = self.model[treatment_name]
 
-            # TODO: The freq need more polish
-            treatment = format_dataframe_time_index(
+            treatment, _ = format_dataframe_order_index(
                 treatment,
-                date=time_name,
-                granularity_specification=self.problem_specification.get('timeGranularity'),
-                freq=None)
-                # freq=model.model._index.freq)
-            treatment.reset_index(inplace=True)
+                is_date=self.problem_specification['is_temporal'],
+                date_format=self.problem_specification['date_format'],
+                order_column=time_name,
+                freq=model._index.freq
+            )
 
-            index = treatment[index_names]
+            # After we create the time_index dataframe, the date_index should be pd.dateTimeIndex
+            index, date_index = treatment[index_names], treatment.index
             treatment.drop(index_names, inplace=True, axis=1)
+            index.reset_index(drop=True, inplace=True)
+            start_time, end_time = date_index[0], date_index[-1]
+            model_end_time = model._index[-1]
+            dataframe_len, history_len = len(treatment.index), len(model._index)
 
             if self.pipeline_specification['model']['strategy'].endswith('_NN'):
-                all = self.problem_specification['targets'] + self.problem_specification['predictors']
-                exog_names = [i for i in self.problem_specification.get('exogenous', []) if i in all]
-                endog = [i for i in all if i not in exog_names and i != time_name]
+                # May contains some issues -- corner cases
+                if model_end_time < start_time:
+                    # TEST SPLIT
+                    predict = pd.DataFrame(
+                        data=model.forecast(treatment, len(treatment.index), real_value=False),
+                        columns=self.problem_specification['targets'],
+                        index=date_index)
+                else:
+                    # TRAIN SPLIT --May include 'all' split
+                    if dataframe_len > history_len:
+                        train_part = model.forecast(treatment.head(history_len), history_len, real_value=True)
+                        test_part = model.forecast(treatment.tail(dataframe_len - history_len),
+                                                   dataframe_len - history_len,
+                                                   real_value=False)
+                        predict = pd.DataFrame(
+                            data=np.concatenate((train_part, test_part), axis=0),
+                            columns=self.problem_specification['targets'],
+                            index=date_index
+                        )
+                    else:
+                        predict = pd.DataFrame(
+                            data=model.forecast(treatment, len(treatment.index), real_value=True),
+                            columns=self.problem_specification['targets'],
+                            index=date_index)
+
+            if self.pipeline_specification['model']['strategy'].startswith('TRA_'):
+                length = len(treatment.index)
+                if model.method == 'AVERAGE' or model.method == 'NAIVE':
+                    if len(model.value.shape) == 1:
+                        model.value = model.value.reshape(1, -1)
+                    data = np.repeat(model.value, length, axis=0)
+                elif model.method == 'DRIFT':
+                    slop, tmp = model.value['slope'], model.value['pivot']
+
+                    if len(tmp.shape) == 1:
+                        tmp = tmp.reshape(1, -1)
+                    if len(slop.shape) != 1:
+                        slop = slop.ravel()
+
+                    data = np.repeat(tmp, length, axis=0)
+                    # Drift method has different behavior in train/test split
+                    if model_end_time < start_time:
+                        # TEST SPLIT
+                        for factor in range(length):
+                            data[factor] += slop * (1 + factor)
+                    else:
+                        # TRAIN SPLIT
+                        if dataframe_len > history_len:
+                            for factor in range(history_len-1, -1, -1):
+                                data[factor] -= slop * (history_len - factor - 1)
+                            # data[history_len] should be the pivot itself
+                            for factor in range(history_len, dataframe_len):
+                                data[factor] += slop * (factor - history_len + 1)
+                        else:
+                            # The last point should be the pivot
+                            for factor in range(length-1, -1, -1):
+                                data[factor] -= slop * (length - factor - 1)
+                else:
+                    raise NotImplementedError('Unsupported method {} detected'.format(model['method']))
 
                 predict = pd.DataFrame(
-                    data=model.forecast(treatment, len(treatment.index)),
-                    columns=endog)
+                    data=data,
+                    columns=self.problem_specification['targets'],
+                    index=date_index)
 
             if predict is not None:
                 # removing data from below the asked-for interval, for example, can make the index start from non-zero
@@ -180,7 +223,7 @@ class SciKitLearnWrapper(BaseModelWrapper):
         if not predictions:
             return pd.DataFrame(data=[], columns=[index_names[0], *target_names])
 
-        # Copy code from statmodel
+        # Copied post-process code from statsmodel
         predictions = pd.concat(predictions)
 
         # remove interpolated entries in the time series that cannot be matched back to the input dataframe
@@ -304,6 +347,9 @@ class StatsModelsWrapper(BaseModelWrapper):
         time_name = next(iter(self.problem_specification.get('time', [])), None)
         index_names = self.problem_specification.get('indexes', ['d3mIndex'])
         target_names = self.problem_specification['targets']
+        # Default length is 10
+        forecast_length = self.problem_specification.get('forecastingHorizon', {"value": 10})
+        forecast_length = forecast_length.get('value', 10)
 
         treatments_data = split_time_series(dataframe=dataframe, cross_section_names=cross_section_names)
         predictions = []
@@ -320,20 +366,32 @@ class StatsModelsWrapper(BaseModelWrapper):
                 continue
             model = self.model[treatment_name]
 
-            treatment = format_dataframe_time_index(
+            # treatment = format_dataframe_time_index(
+            #     treatment,
+            #     date=time_name,
+            #     granularity_specification=self.problem_specification.get('timeGranularity'),
+            #     freq=model.model._index.freq)
+
+            treatment, _ = format_dataframe_order_index(
                 treatment,
-                date=time_name,
-                granularity_specification=self.problem_specification.get('timeGranularity'),
-                freq=model.model._index.freq)
+                order_column=time_name,
+                is_date=self.problem_specification['is_temporal'],
+                date_format=self.problem_specification['date_format'],
+                freq=model.model._index.freq
+            )
+
             treatment.reset_index(inplace=True)
 
             start = treatment[time_name].iloc[0]
             end = treatment[time_name].iloc[-1]
+            # end = treatment[time_name].iloc[-1] if len(treatment) > forecast_length \
+            #     else treatment[time_name].iloc[forecast_length-1]
 
             index = treatment[index_names]
             treatment.drop(index_names, inplace=True, axis=1)
             # print('index', index)
 
+            # Removed strategy ?
             if self.pipeline_specification['model']['strategy'] == 'AR':
                 # model.model.endog = dataframe_history
                 # standardize to dataframe
@@ -398,7 +456,7 @@ class StatsModelsWrapper(BaseModelWrapper):
                     predict = predict[predict[time_name] >= start]
                     # print(predict)
 
-            if self.pipeline_specification['model']['strategy'] == 'SARIMAX':
+            if self.pipeline_specification['model']['strategy'].startswith('SARIMAX'):
                 all = self.problem_specification['targets'] + self.problem_specification['predictors']
                 exog_names = [i for i in self.problem_specification.get('exogenous', []) if i in all]
                 endog = [i for i in all if i not in exog_names and i != time_name]
@@ -433,7 +491,7 @@ class StatsModelsWrapper(BaseModelWrapper):
         predictions.reset_index(drop=True, inplace=True)
         return predictions
 
-    def forecast(self, dataframe):
+    def forecast(self, dataframe, split_mode='test'):
         return self.predict(dataframe)
 
     def refit(self, dataframe=None, data_specification=None):

@@ -2,25 +2,28 @@
 strategies = {
     'FORECASTING': {
         'UNIVARIATE': [
-            # {
-            #     'strategy': 'AR',
-            #     'library': 'statsmodels'
-            # },
+            {
+                'strategy': 'AR',
+                'library': 'statsmodels'
+            },
             *[
                 {
-                    'strategy': 'SARIMAX',
+                    'strategy': 'SARIMAX_({},{},{})'.format(order[0], order[1], order[2]),
                     'library': 'statsmodels',
                     'order': order,
                 }
-                for order in [(1, 0, 0), (1, 1, 1), (4, 1, 2), (2, 1, 0)]
+                for order in [(1, 0, 0), (1, 1, 1), (4, 1, 2), (2, 1, 0), (0, 1, 2), (0, 1, 1), (0, 2, 2)]
             ],
             *[
                 {
                     'strategy': 'AR_NN',
                     'library': 'sklearn',
                     'back_steps': step,
-                } for step in [1, 2, 3, 4]
-            ]
+                } for step in [1, 2]
+            ],
+            {'strategy': 'TRA_AVERAGE', 'library': 'sklearn'},
+            {'strategy': 'TRA_NAIVE', 'library': 'sklearn'},
+            {'strategy': 'TRA_DRIFT', 'library': 'sklearn'},
         ],
         'MULTIVARIATE': [
             {
@@ -33,7 +36,10 @@ strategies = {
                     'library': 'sklearn',
                     'back_steps': step,
                 } for step in [1, 2, 3, 4]
-            ]
+            ],
+            {'strategy': 'TRA_AVERAGE', 'library': 'sklearn'},
+            {'strategy': 'TRA_NAIVE', 'library': 'sklearn'},
+            {'strategy': 'TRA_DRIFT', 'library': 'sklearn'},
         ]
     },
     'CLASSIFICATION': {
