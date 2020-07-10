@@ -90,11 +90,11 @@ def format_dataframe_order_index(dataframe, order_column=None, is_date=True, dat
     if order_column is None and date_format:
         raise ValueError('date_format must be None when date is None')
 
-    # Create dummy date index if date is not given -- treated as
-    if order_column is None:
-        order_column = 'ravensDateIndex'
-        while order_column in dataframe:
-            order_column += '_'
+    # order_column would never be None, based on the front-end implementation
+    # if order_column is None or order_column == 'd3mIndex':
+    #     order_column = 'ravensDateIndex'
+    #     while order_column in dataframe:
+    #         order_column += '_'
 
     # Attempt to parse given date column
     if order_column in dataframe:
@@ -123,19 +123,31 @@ def format_dataframe_order_index(dataframe, order_column=None, is_date=True, dat
                 pass
 
     # if there was a spec, but no valid date column to apply it to, then ignore it
+    # All parse branch failed, go for dummy dateIndex
+    dummy_column = 'ravensDateIndex'
+    while dummy_column in dataframe:
+        dummy_column += '_'
+
+    dummy_series = pd.date_range(start_dummy, periods=len(dataframe), freq='D')
+
+    dataframe.insert(0, dummy_column, dummy_series)
+
     mapping_dic = {
-        'start': [dataframe[order_column][0], dataframe[order_column[0]]],
-        'end': [dataframe[order_column][-1], dataframe[order_column][-1]]}
+        'start': [dataframe[dummy_column][0], dataframe[order_column][0]],
+        'end': [dataframe[dummy_column][len(dataframe)-1], dataframe[order_column][len(dataframe)-1]],
+        'index': dummy_column
+    }
 
-    dataframe[order_column] = pd.date_range(start_dummy, periods=len(dataframe), freq='D')
+    # raise Exception(mapping_dic)
 
-    if not is_date:
-        # Return a mapping dic if the index is some sequential list
-        mapping_dic['start'][1] = dataframe[order_column][0]
-        mapping_dic['end'][1] = dataframe[order_column[-1]]
-        return dataframe.set_index(order_column), mapping_dic
+    dataframe = dataframe.set_index(dummy_column)
 
-    return dataframe.set_index(order_column), None
+    return dataframe, mapping_dic
+    #
+    # if is_date:
+    #     return dataframe, None
+    # else:
+    #     return dataframe, mapping_dic
 
 
 def resample_dataframe_time_index(dataframe, date, freq=None):
@@ -148,6 +160,7 @@ def resample_dataframe_time_index(dataframe, date, freq=None):
     """
     temporal_series = dataframe[date]
     estimated_freq = get_freq(series=temporal_series)
+    # print(estimated_freq)
 
     # fall back to line-space if data is completely irregular
     if temporal_series is not None and not estimated_freq:
@@ -353,4 +366,8 @@ def split_time_series(dataframe, cross_section_names=None):
         return {(): dataframe}
 
     others = [i for i in dataframe.columns.values if i not in cross_section_names]
-    return {label: data[others] for label, data in dataframe.groupby(cross_section_names)}
+    content = {label: data[others] for label, data in dataframe.groupby(cross_section_names)}
+    for eachGroup in content:
+        content[eachGroup].reset_index(drop=True, inplace=True)
+    return content
+    # return {label: data[others] for label, data in dataframe.groupby(cross_section_names)}

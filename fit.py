@@ -45,7 +45,7 @@ def fit_pipeline(pipeline_specification, train_specification):
 
     # Test code for dummy preprocessor return
     if 'is_temproal' not in problem_specification:
-        problem_specification['is_temporal'] = True
+        problem_specification['is_temporal'] = False
     if 'data_format' not in problem_specification:
         problem_specification['date_format'] = None
 
@@ -142,9 +142,6 @@ def fit_forecast_preprocess(dataframe, problem_specification, train_specificatio
     preprocessors = {}
 
     for treatment_name in dataframe_split:
-        # treatment_data = format_dataframe_time_index(
-        #     dataframe_split[treatment_name],
-        #     date=time)
         treatment_data, mapping_dic = format_dataframe_order_index(
             dataframe_split[treatment_name],
             is_date=problem_specification['is_temporal'],
@@ -251,32 +248,39 @@ def fit_model_ar(dataframes, model_specification, problem_specification):
     models = {}
 
     for treatment_name in dataframes:
-        treatment_data = dataframes[treatment_name]
-        if time is None:
-            problem_specification['time'] = treatment_data['time'].name
+        try:
+            treatment_data = dataframes[treatment_name]
+            # print(treatment_data)
+            if time is None:
+                problem_specification['time'] = treatment_data['time'].name
 
-        # freq = get_freq(
-        #     granularity_specification=problem_specification.get('timeGranularity'),
-        #     series=treatment_data['time'])
+            # freq = get_freq(
+            #     granularity_specification=problem_specification.get('timeGranularity'),
+            #     series=treatment_data['time'])
 
-        # UPDATE: statsmodels==0.10.x
-        from statsmodels.tsa.ar_model import AR
-        model = AR(
-            endog=treatment_data['endogenous'].astype(float),
-            dates=treatment_data['time'],
-            # freq=freq
-        )
-        models[treatment_name] = model.fit(
-            **filter_args(model_specification, ['start_params', 'maxlags', 'ic', 'trend']))
+            # UPDATE: statsmodels==0.10.x
+            from statsmodels.tsa.ar_model import AR
+            model = AR(
+                endog=treatment_data['endogenous'].astype(float),
+                dates=treatment_data['time'],
+                # freq=treatment_data['endogenous'].index.freq
+                # freq=freq
+            )
+            models[treatment_name] = model.fit(
+                **filter_args(model_specification, ['start_params', 'maxlags', 'ic', 'trend']))
 
-        # UPDATE: statsmodels==0.11.x
-        # from statsmodels.tsa.ar_model import AutoReg
-        # model = AutoReg(**{
-        #     'endog': dataframe[endog],
-        #     'exog': dataframe[exog] if exog else None,
-        #     **filter_args(model_spec, ['lags', 'trend', 'seasonal', 'hold_back', 'period'])
-        # })
-        # return model.fit()
+            # UPDATE: statsmodels==0.11.x
+            # from statsmodels.tsa.ar_model import AutoReg
+            # model = AutoReg(**{
+            #     'endog': dataframe[endog],
+            #     'exog': dataframe[exog] if exog else None,
+            #     **filter_args(model_spec, ['lags', 'trend', 'seasonal', 'hold_back', 'period'])
+            # })
+            # return model.fit()
+        except Exception:
+            # import traceback
+            # traceback.print_exc()
+            print('skipping cross section: ' + str(treatment_name))
 
     return models
 
@@ -499,7 +503,9 @@ def fit_model_var_ann(dataframes, model_specification, problem_specification):
         if treatment_data['exogenous']:
             print('Exogenous features will not be considered now.')
 
-        container = treatment_data['endogenous'].astype(float)
+        # container = treatment_data['endogenous'].astype(float)
+        endog_mask = treatment_data['endogenous'].var(axis=0) > 0
+        container = treatment_data['endogenous'][endog_mask.index[endog_mask]].astype(float)
         y_column = container  # Predict Y, X1, X2 ... simultaneously
         tmp_block = pd.DataFrame()
         history_points = y_column.tail(back_steps)
@@ -534,6 +540,9 @@ class DummyTra(object):
         # Index object that should be pd.DateTimeIndex or ...
         self._index = None
         self.num_tgt = num_tgt
+
+    def __str__(self):
+        return self.value
     pass
 
 

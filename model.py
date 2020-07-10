@@ -108,8 +108,7 @@ class SciKitLearnWrapper(BaseModelWrapper):
                 index=dataframe.index)
         return self.model.predict_proba(dataframe)
 
-    def forecast(self, dataframe, split_mode='test'):
-        # The length of input dataframe equals to the forecastingHorizon
+    def forecast(self, dataframe, forecast_len, forecast_mode='test'):
         cross_section_names = self.problem_specification.get('crossSection', [])
         time_name = next(iter(self.problem_specification.get('time', [])), None)
         index_names = self.problem_specification.get('indexes', ['d3mIndex'])
@@ -121,54 +120,58 @@ class SciKitLearnWrapper(BaseModelWrapper):
 
         for treatment_name in treatments_data:
             treatment = treatments_data[treatment_name]
+            # treatment = treatment.head(forecast_len)
             if type(treatment_name) is not tuple:
-                treatment_name = (treatment_name,)
+                pass
             if treatment_name not in self.model:
                 print('unknown treatment:', treatment_name)
                 continue
             model = self.model[treatment_name]
 
-            treatment, _ = format_dataframe_order_index(
+            treatment, mapping_dic = format_dataframe_order_index(
                 treatment,
                 is_date=self.problem_specification['is_temporal'],
                 date_format=self.problem_specification['date_format'],
                 order_column=time_name,
                 freq=model._index.freq
             )
+            treatment = treatment.head(forecast_len)
 
-            # After we create the time_index dataframe, the date_index should be pd.dateTimeIndex
-            index, date_index = treatment[index_names], treatment.index
-            treatment.drop(index_names, inplace=True, axis=1)
+            index, date_index, original_time_index = treatment[index_names], treatment.index, None
+            # treatment.drop(index_names, inplace=True, axis=1)
+            # Deal with a very specific case that d3mIndex plays the role of time
+            treatment.drop([eachIndex for eachIndex in index_names if eachIndex in treatment.columns],
+                           inplace=True, axis=1)
+
+            if mapping_dic and time_name in treatment.columns:
+                # Dummy dateTimeIndex is activated, the original order-column should be dropped.
+                treatment.drop(time_name, inplace=True, axis=1)
             index.reset_index(drop=True, inplace=True)
-            start_time, end_time = date_index[0], date_index[-1]
-            model_end_time = model._index[-1]
             dataframe_len, history_len = len(treatment.index), len(model._index)
 
             if self.pipeline_specification['model']['strategy'].endswith('_NN'):
                 # May contains some issues -- corner cases
-                if model_end_time < start_time:
+                if 'test' == forecast_mode:
                     # TEST SPLIT
                     predict = pd.DataFrame(
                         data=model.forecast(treatment, len(treatment.index), real_value=False),
                         columns=self.problem_specification['targets'],
                         index=date_index)
+                elif 'train' == forecast_mode:
+                    predict = pd.DataFrame(
+                        data=model.forecast(treatment, len(treatment.index), real_value=True),
+                        columns=self.problem_specification['targets'],
+                        index=date_index)
                 else:
-                    # TRAIN SPLIT --May include 'all' split
-                    if dataframe_len > history_len:
-                        train_part = model.forecast(treatment.head(history_len), history_len, real_value=True)
-                        test_part = model.forecast(treatment.tail(dataframe_len - history_len),
-                                                   dataframe_len - history_len,
-                                                   real_value=False)
-                        predict = pd.DataFrame(
-                            data=np.concatenate((train_part, test_part), axis=0),
-                            columns=self.problem_specification['targets'],
-                            index=date_index
-                        )
-                    else:
-                        predict = pd.DataFrame(
-                            data=model.forecast(treatment, len(treatment.index), real_value=True),
-                            columns=self.problem_specification['targets'],
-                            index=date_index)
+                    train_part = model.forecast(treatment.head(history_len), history_len, real_value=True)
+                    test_part = model.forecast(treatment.tail(dataframe_len - history_len),
+                                               dataframe_len - history_len,
+                                               real_value=False)
+                    predict = pd.DataFrame(
+                        data=np.concatenate((train_part, test_part), axis=0),
+                        columns=self.problem_specification['targets'],
+                        index=date_index
+                    )
 
             if self.pipeline_specification['model']['strategy'].startswith('TRA_'):
                 length = len(treatment.index)
@@ -186,22 +189,20 @@ class SciKitLearnWrapper(BaseModelWrapper):
 
                     data = np.repeat(tmp, length, axis=0)
                     # Drift method has different behavior in train/test split
-                    if model_end_time < start_time:
+                    if 'test' == forecast_mode:
                         # TEST SPLIT
                         for factor in range(length):
                             data[factor] += slop * (1 + factor)
+                    elif 'train' == forecast_mode:
+                        for factor in range(length - 1, -1, -1):
+                            data[factor] -= slop * (length - factor - 1)
                     else:
-                        # TRAIN SPLIT
-                        if dataframe_len > history_len:
-                            for factor in range(history_len-1, -1, -1):
-                                data[factor] -= slop * (history_len - factor - 1)
-                            # data[history_len] should be the pivot itself
-                            for factor in range(history_len, dataframe_len):
-                                data[factor] += slop * (factor - history_len + 1)
-                        else:
-                            # The last point should be the pivot
-                            for factor in range(length-1, -1, -1):
-                                data[factor] -= slop * (length - factor - 1)
+                        for factor in range(history_len - 1, -1, -1):
+                            data[factor] -= slop * (history_len - factor - 1)
+                        # data[history_len] should be the pivot itself
+                        for factor in range(history_len, dataframe_len):
+                            data[factor] += slop * (factor - history_len + 1)
+
                 else:
                     raise NotImplementedError('Unsupported method {} detected'.format(model['method']))
 
@@ -216,8 +217,12 @@ class SciKitLearnWrapper(BaseModelWrapper):
 
                 predict[index_names] = index
 
+                if not isinstance(treatment_name, tuple):
+                    treatment_name = (treatment_name,)
+
                 for i, section in enumerate(cross_section_names):
                     predict[section] = treatment_name[i]
+
                 predictions.append(predict)
 
         if not predictions:
@@ -360,17 +365,13 @@ class StatsModelsWrapper(BaseModelWrapper):
         for treatment_name in treatments_data:
             treatment = treatments_data[treatment_name]
             if type(treatment_name) is not tuple:
-                treatment_name = (treatment_name,)
+                pass
             if treatment_name not in self.model:
                 print('unknown treatment:', treatment_name)
+                ava = [name for name in self.model]
+                print('Available models:', ava)
                 continue
             model = self.model[treatment_name]
-
-            # treatment = format_dataframe_time_index(
-            #     treatment,
-            #     date=time_name,
-            #     granularity_specification=self.problem_specification.get('timeGranularity'),
-            #     freq=model.model._index.freq)
 
             treatment, _ = format_dataframe_order_index(
                 treatment,
@@ -471,6 +472,8 @@ class StatsModelsWrapper(BaseModelWrapper):
 
                 predict[index_names] = index
 
+                if not isinstance(treatment_name, list):
+                    treatment_name = [treatment_name]
                 for i, section in enumerate(cross_section_names):
                     predict[section] = treatment_name[i]
                 predictions.append(predict)
@@ -491,8 +494,143 @@ class StatsModelsWrapper(BaseModelWrapper):
         predictions.reset_index(drop=True, inplace=True)
         return predictions
 
-    def forecast(self, dataframe, split_mode='test'):
-        return self.predict(dataframe)
+    def forecast(self, dataframe, forecast_len=None, forecast_mode='test'):
+        cross_section_names = self.problem_specification.get('crossSection', [])
+        time_name = next(iter(self.problem_specification.get('time', [])), None)
+        index_names = self.problem_specification.get('indexes', ['d3mIndex'])
+        target_names = self.problem_specification['targets']
+
+        treatments_data = split_time_series(dataframe=dataframe, cross_section_names=cross_section_names)
+        predictions = []
+        predict = None
+
+        for treatment_name in treatments_data:
+            treatment = treatments_data[treatment_name]
+
+            if type(treatment_name) is not tuple:
+                treatment_name = (treatment_name,)
+            if treatment_name not in self.model:
+                print('unknown treatment:', treatment_name)
+                continue
+            model = self.model[treatment_name]
+
+            treatment, _ = format_dataframe_order_index(
+                treatment,
+                order_column=time_name,
+                is_date=self.problem_specification['is_temporal'],
+                date_format=self.problem_specification['date_format'],
+                freq=model.model._index.freq
+            )
+
+            treatment.reset_index(inplace=True)
+            treatment = treatment.head(forecast_len)
+
+            index = treatment[index_names]
+            # Deal with a very specific case that d3mIndex plays the role of time
+            treatment.drop([eachIndex for eachIndex in index_names if eachIndex in treatment.columns],
+                           inplace=True, axis=1)
+
+            # Removed strategy ?
+            if self.pipeline_specification['model']['strategy'] == 'AR':
+                if 'test' == forecast_mode:
+                    predict = model.predict(
+                        start=len(model.model._index) - 1,
+                        end=len(model.model._index) + min(forecast_len, len(treatment.index) - 1)
+                    ).to_frame(name=self.problem_specification['targets'][0])
+                elif 'train' == forecast_mode:
+                    predict = model.predict(
+                        start=0,
+                        end=min(forecast_len, len(treatment.index) - 1)
+                    ).to_frame(name=self.problem_specification['targets'][0])
+                else:
+                    # All split
+                    predict = model.predict(
+                        start=0,
+                        end=len(treatment.index) - 1
+                    ).to_frame(name=self.problem_specification['targets'][0])
+
+                predict.index.name = time_name
+                predict.reset_index()
+
+            if self.pipeline_specification['model']['strategy'] == 'VAR':
+                endog_target_names = [i for i in self.problem_specification['targets'] if i != time_name]
+
+                if 'test' == forecast_mode:
+                    predict = model.model.predict(
+                        params=model.params,
+                        start=len(model.model._index) - 1,
+                        end=len(model.model._index) + min(forecast_len, len(treatment.index) - 1)
+                    )
+                elif 'train' == forecast_mode:
+                    predict = model.model.predict(
+                        params=model.params,
+                        start=0,
+                        end=min(forecast_len, len(treatment.index) - 1)
+                    )
+                else:
+                    # All split
+                    predict = model.model.predict(
+                        params=model.params,
+                        start=0,
+                        end=len(treatment.index) - 1
+                    )
+
+                if len(predict) == 0:
+                    predict = np.empty(shape=(0, len(endog_target_names)))
+
+                # predictions don't provide dates; dates reconstructed based on freq
+                predict = pd.DataFrame(
+                    data=predict[:, :len(endog_target_names)],
+                    columns=endog_target_names)
+
+            if self.pipeline_specification['model']['strategy'].startswith('SARIMAX'):
+                all = self.problem_specification['targets'] + self.problem_specification['predictors']
+                all = [item for item in all if item not in cross_section_names]
+                exog_names = [i for i in self.problem_specification.get('exogenous', []) if i in all]
+                endog = [i for i in all if i not in exog_names and i != time_name]
+
+                if 'test' == forecast_mode:
+                    predict = pd.DataFrame(
+                        data=model.predict(len(model.model._index) - 1,
+                                           len(model.model._index) + min(forecast_len, len(treatment.index)) - 1),
+                        columns=endog
+                    )
+                elif 'train' == forecast_mode:
+                    predict = pd.DataFrame(
+                        data=model.predict(0, min(forecast_len, len(treatment.index)) - 1),
+                        columns=endog
+                    )
+                else:
+                    # All Split
+                    predict = pd.DataFrame(
+                        data=model.predict(0, len(treatment.index) - 1),
+                        columns=endog
+                    )
+
+            if predict is not None:
+                # Fix cross-section-name
+                predict.reset_index(drop=True, inplace=True)
+                predict[index_names] = index
+
+                for i, section in enumerate(cross_section_names):
+                    predict[section] = treatment_name[i]
+                predictions.append(predict)
+
+        if not predictions:
+            return pd.DataFrame(data=[], columns=[index_names[0], *target_names])
+
+        predictions = pd.concat(predictions)
+
+        # remove interpolated entries in the time series that cannot be matched back to the input dataframe
+        predictions.dropna(inplace=True)
+
+        # cast d3mIndex back to int (it became float due to na values)
+        predictions[index_names[0]] = predictions[index_names[0]].astype(int)
+
+        # indices are duplicated after concat
+        predictions.reset_index(drop=True, inplace=True)
+
+        return predictions
 
     def refit(self, dataframe=None, data_specification=None):
         pass

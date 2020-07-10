@@ -130,6 +130,8 @@ class SearchManager(object):
         # TODO: forecasting subtypes need rework
         if problem_specification['taskType'] == 'FORECASTING':
             variables = problem_specification['targets'] + problem_specification['predictors']
+            tmp_cross = problem_specification.get('crossSection', [])
+            variables = [var for var in variables if var not in tmp_cross]
             subtask = 'MULTIVARIATE' if len(variables) > 2 else 'UNIVARIATE'
 
         if problem_specification['taskType'] == 'FORECASTING' and self.problem_specification.get('crossSection'):

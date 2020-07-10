@@ -238,7 +238,7 @@ class ModMLPForecaster(RegressorMixin, ModBaseMLP):
         X, y = check_X_y(X, y, accept_sparse=['csr', 'csc', 'coo'],
                          multi_output=True, y_numeric=True)
         if y.ndim == 2 and y.shape[1] == 1:
-            y = column_or_1d(y, warn=True)
+            y = column_or_1d(y, warn=False)
         return X, y
 
     def set_history(self, data, index):
