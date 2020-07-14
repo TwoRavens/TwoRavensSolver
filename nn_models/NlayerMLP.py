@@ -1,4 +1,4 @@
-from sklearn.neural_network.multilayer_perceptron import BaseMultilayerPerceptron
+from sklearn.neural_network._multilayer_perceptron import BaseMultilayerPerceptron
 from sklearn.neural_network._base import LOSS_FUNCTIONS, DERIVATIVES
 from sklearn.utils.extmath import safe_sparse_dot
 from sklearn.base import RegressorMixin
@@ -46,7 +46,7 @@ class ModBaseMLP(BaseMultilayerPerceptron):
                  verbose=False, warm_start=False, momentum=0.9,
                  nesterovs_momentum=True, early_stopping=False,
                  validation_fraction=0.1, beta_1=0.9, beta_2=0.999,
-                 epsilon=1e-8, n_iter_no_change=10):
+                 epsilon=1e-8, n_iter_no_change=10, max_fun=15000):
         super().__init__(
             hidden_layer_sizes=hidden_layer_sizes,
             activation=activation, solver=solver, alpha=alpha,
@@ -59,7 +59,7 @@ class ModBaseMLP(BaseMultilayerPerceptron):
             early_stopping=early_stopping,
             validation_fraction=validation_fraction,
             beta_1=beta_1, beta_2=beta_2, epsilon=epsilon,
-            n_iter_no_change=n_iter_no_change)
+            n_iter_no_change=n_iter_no_change, max_fun=max_fun)
 
         if 'squared_loss' != self.loss and 'rooted_squared_loss' != self.loss and 'mean_absolute_loss' != self.loss:
             raise NotImplementedError('Unsupported Loss specified: {}'.format(self.loss))
