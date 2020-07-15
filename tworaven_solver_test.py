@@ -70,7 +70,7 @@ problems = {
                 "name": "in-sample",
                 "resource_uri": "file://" + '/ravens_volume/test_data/TR_TS_appliance/TRAIN/dataset_TRAIN/tables/learningData.csv'
             },
-            "performanceMetric": "meanSquaredError"
+            "performanceMetric": {"metric": "meanSquaredError"}
         }
     },
     'baseball': {
@@ -139,22 +139,23 @@ problems = {
 
 from tworaven_solver.search import SearchManager
 
-problem = problems['sunspots']
+problem = problems['appliance']
 pip_spe, train_spe = problem['pipeline_specification'], problem['train_specification']
 search_manager = SearchManager(None, train_spe['problem'])
 new_pip = search_manager.get_pipeline_specification()
 # print(new_pip)
 
-while new_pip["model"]['strategy'] != "SARIMAX":
-    new_pip = search_manager.get_pipeline_specification()
+# while new_pip["model"]['strategy'] != "SARIMAX":
+new_pip = search_manager.get_pipeline_specification()
 
 model = tworaven_solver.fit_pipeline(new_pip, train_spe)
 
 
 dataframe = pd.read_csv(problem['train_specification']['input']['resource_uri'].replace('file://', ''))
 
-# res = model.forecast(dataframe)
-res = model.predict(dataframe)
+# res = model.forecast
+dataframe = dataframe[['Appliances', 'T1', 'T2', 'date', 'd3mIndex']]
+res = model.forecast(dataframe)
 print(res)
 
 
