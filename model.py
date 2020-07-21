@@ -106,7 +106,11 @@ class SciKitLearnWrapper(BaseModelWrapper):
             dataframe = pd.DataFrame(
                 data=self.preprocessors['predictors'].transform(dataframe),
                 index=dataframe.index)
-        return self.model.predict_proba(dataframe)
+
+        if 'predict_proba' in dir(self.model):
+            return self.model.predict_proba(dataframe)
+        else:
+            return self.model.decision_function(dataframe)
 
     def forecast(self, dataframe, forecast_len, forecast_mode='test'):
         cross_section_names = self.problem_specification.get('crossSection', [])

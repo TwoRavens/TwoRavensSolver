@@ -3,7 +3,6 @@ from .utilities import Dataset, preprocess
 from .utilities import (
     filter_args,
     get_freq,
-    format_dataframe_time_index,
     format_dataframe_order_index,
     split_time_series
 )
@@ -81,6 +80,7 @@ def fit_pipeline(pipeline_specification, train_specification):
 
     # 3. modeling
     model_specification = pipeline_specification['model']
+    model_specification['probability'] = True  # Aux operation for Sklearn-SVC
     model = fit_model(dataframes, model_specification, problem_specification)
 
     # model_specification['library'] = 'statsmodels'
@@ -420,6 +420,11 @@ def factory_fit_model_sklearn(sklearn_class):
                     'sample_weight': dataframes.get('weight')
                 },
                 list(inspect.signature(sklearn_class.fit).parameters.keys())))
+
+        if hasattr(model, 'classes_'):
+            # This is a classification problem, store the label for future use
+            tmp_list = model.classes_.tolist()
+            problem_specification['clf_classes'] = [str(item) for item in tmp_list]
         return model
     return fit_model
 
