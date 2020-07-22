@@ -90,6 +90,12 @@ class SciKitLearnWrapper(BaseModelWrapper):
     def predict(self, dataframe):
         index = dataframe.index
         dataframe = dataframe[self.problem_specification['predictors']]
+
+        # Categorical variable should be converted to string
+        nominal = [i for i in self.problem_specification.get('categorical', [])
+                   if i in self.problem_specification['predictors']]
+        dataframe[nominal] = dataframe[nominal].astype(str)
+
         if self.preprocessors:
             dataframe = pd.DataFrame(
                 data=self.preprocessors['predictors'].transform(dataframe),
