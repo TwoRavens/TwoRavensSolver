@@ -74,7 +74,7 @@ strategies = {
                 } for n_estimators in [10, 100]
             ],
             {'strategy': 'SUPPORT_VECTOR_CLASSIFIER', 'library': 'sklearn'},
-            {"strategy": "RIDGE_CLASSIFIER", 'library': 'sklearn'},
+            # {"strategy": "RIDGE_CLASSIFIER", 'library': 'sklearn'},
             {"strategy": "K_NEIGHBORS_CLASSIFIER", 'library': 'sklearn'},
             {"strategy": "DECISION_TREE_CLASSIFIER", 'library': 'sklearn'},
             {"strategy": "GRADIENT_BOOSTING_CLASSIFIER", "library": "sklearn"},
