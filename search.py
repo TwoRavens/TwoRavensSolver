@@ -54,6 +54,7 @@ strategies = {
             ],
             {'strategy': 'SUPPORT_VECTOR_CLASSIFIER', 'library': 'sklearn'},
             {"strategy": "RIDGE_CLASSIFIER", 'library': 'sklearn'},
+            {"strategy": "RIDGE_CLASSIFIER_CV", 'library': 'sklearn'},
             {"strategy": "K_NEIGHBORS_CLASSIFIER", 'library': 'sklearn'},
             {"strategy": "DECISION_TREE_CLASSIFIER", 'library': 'sklearn'},
             {"strategy": "GRADIENT_BOOSTING_CLASSIFIER", "library": "sklearn"},
@@ -64,6 +65,7 @@ strategies = {
             {"strategy": "GAUSSIAN_NAIVE_BAYES", "library": "sklearn"},
             {"strategy": "COMPLEMENT_NAIVE_BAYES", "library": "sklearn"},
             {"strategy": "ADABOOST_CLASSIFIER", "library": "sklearn"},
+            {'strategy': 'LOGISTIC_REGRESSION_CV', 'library': 'sklearn'},
         ],
         'MULTICLASS': [
             *[
@@ -114,6 +116,7 @@ strategies = {
             {"strategy": "ADABOOST_REGRESSOR", "library": "sklearn"},
             {"strategy": "GRADIENT_BOOSTING_REGRESSOR", "library": "sklearn"},
             {"strategy": "GAUSSIAN_PROCESS_REGRESSOR", "library": "sklearn"},
+            {"strategy": "RIDGE_CV", "library": "sklearn"},
         ]
     }
 }
@@ -134,10 +137,10 @@ class SearchManager(object):
             variables = [var for var in variables if var not in tmp_cross]
             subtask = 'MULTIVARIATE' if len(variables) > 2 else 'UNIVARIATE'
 
-        if problem_specification['taskType'] == 'FORECASTING' and self.problem_specification.get('crossSection'):
-            self.generator = iter(strategies.get(task, {}).get(subtask, []))
-        else:
-            self.generator = iter(strategies.get(task, {}).get(subtask, []))
+        # if problem_specification['taskType'] == 'FORECASTING' and self.problem_specification.get('crossSection'):
+        self.generator = iter(strategies.get(task, {}).get(subtask, []))
+        # else:
+        #     self.generator = iter(strategies.get(task, {}).get(subtask, []))
 
     def get_pipeline_specification(self):
         try:

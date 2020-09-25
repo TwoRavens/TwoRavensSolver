@@ -1,21 +1,20 @@
 import abc
 import inspect
-
-import warnings
-import joblib
-# import torch
-
-from .utilities import split_time_series, format_dataframe_time_index, filter_args, format_dataframe_order_index
-from .fit import fit_forecast_preprocess
-
-from statsmodels.tsa.ar_model import ARResultsWrapper
-from statsmodels.tsa.vector_ar.var_model import VARResultsWrapper
-from statsmodels.tsa.statespace.sarimax import SARIMAXResultsWrapper
-
 import json
 import os
-import pandas as pd
+import warnings
+
+import joblib
 import numpy as np
+import pandas as pd
+from statsmodels.tsa.ar_model import ARResultsWrapper
+from statsmodels.tsa.statespace.sarimax import SARIMAXResultsWrapper
+from statsmodels.tsa.vector_ar.var_model import VARResultsWrapper
+
+from .utilities import split_time_series, filter_args, format_dataframe_order_index
+
+
+# import torch
 
 
 class BaseModelWrapper(object):
@@ -85,7 +84,17 @@ class SciKitLearnWrapper(BaseModelWrapper):
     library = 'scikit-learn'
 
     def describe(self):
-        pass
+        def is_serializable(v):
+            try:
+                json.dumps(v)
+                return True
+            except Exception:
+                return False
+
+        return {'all_parameters': {
+            k: v for k, v in self.model.get_params().items()
+            if k not in ['warm_start', 'verbose', 'n_jobs'] and v is not None and is_serializable(v)
+        }}
 
     def predict(self, dataframe):
         index = dataframe.index

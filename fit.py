@@ -8,7 +8,8 @@ from .utilities import (
 )
 
 from sklearn.linear_model import LinearRegression, LogisticRegression, RidgeClassifier, \
-    Lasso, LassoLars, ElasticNet, OrthogonalMatchingPursuit
+    Lasso, LassoLars, ElasticNet, OrthogonalMatchingPursuit, RidgeClassifierCV, LogisticRegressionCV, \
+    RidgeCV
 from sklearn.ensemble import\
     RandomForestClassifier, RandomForestRegressor,\
     AdaBoostClassifier, AdaBoostRegressor, \
@@ -43,7 +44,7 @@ def fit_pipeline(pipeline_specification, train_specification):
     problem_specification['performanceMetric'] = loss_name
 
     # Test code for dummy preprocessor return
-    if 'is_temproal' not in problem_specification:
+    if 'is_temporal' not in problem_specification:
         problem_specification['is_temporal'] = False
     if 'data_format' not in problem_specification:
         problem_specification['date_format'] = None
@@ -204,9 +205,12 @@ def fit_model(dataframes, model_specification, problem_specification, start_para
         'SARIMAX': fit_model_sarimax,
         'ORDINARY_LEAST_SQUARES': factory_fit_model_sklearn(LinearRegression),
         'LOGISTIC_REGRESSION': factory_fit_model_sklearn(LogisticRegression),
+        'LOGISTIC_REGRESSION_CV': factory_fit_model_sklearn(LogisticRegressionCV),
         'RANDOM_FOREST': factory_fit_model_sklearn(RandomForestClassifier),
         'SUPPORT_VECTOR_CLASSIFIER': factory_fit_model_sklearn(SVC),
         "RIDGE_CLASSIFIER": factory_fit_model_sklearn(RidgeClassifier),
+        "RIDGE_CLASSIFIER_CV": factory_fit_model_sklearn(RidgeClassifierCV),
+        "RIDGE_CV": factory_fit_model_sklearn(RidgeCV),
         "RANDOM_FOREST_REGRESSOR": factory_fit_model_sklearn(RandomForestRegressor),
         "SUPPORT_VECTOR_REGRESSION": factory_fit_model_sklearn(SVR),
         "K_NEIGHBORS_CLASSIFIER": factory_fit_model_sklearn(KNeighborsClassifier),
