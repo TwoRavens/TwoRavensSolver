@@ -53,9 +53,9 @@ def fit_pipeline(pipeline_specification, train_specification):
     if weights and weights[0] in problem_specification['predictors']:
         problem_specification['predictors'].remove(weights[0])
 
-    times = problem_specification.get('time')
-    if times and times[0] in problem_specification['predictors']:
-        problem_specification['predictors'].remove(times[0])
+    ordering_column = problem_specification.get('forecastingHorizon', {}).get('column')
+    if ordering_column and ordering_column in problem_specification['predictors']:
+        problem_specification['predictors'].remove(ordering_column)
 
     # drop null values in the target column
     dataframe = dataframe[dataframe[problem_specification['targets']].notnull().all(1)]
@@ -126,7 +126,7 @@ def fit_forecast_preprocess(dataframe, problem_specification, train_specificatio
         dataframe=dataframe,
         cross_section_names=problem_specification.get('crossSection', []))
 
-    time = next(iter(problem_specification.get('time', [])), None)
+    ordering_column = problem_specification.get("forecastingHorizon", {}).get('column')
 
     # targets cannot be exogenous, subset exogenous labels to the predictor set
     exog_names = [i for i in problem_specification.get('exogenous', []) if
@@ -135,9 +135,9 @@ def fit_forecast_preprocess(dataframe, problem_specification, train_specificatio
     # print('exog_names', exog_names)
     # target variables are not transformed, all other variables are transformed
     endog_non_target_names = [i for i in problem_specification['predictors'] if
-                              i not in exog_names and i != time and
+                              i not in exog_names and i != ordering_column and
                               i not in problem_specification.get('crossSection', [])]
-    endog_target_names = [i for i in problem_specification['targets'] if i != time]
+    endog_target_names = [i for i in problem_specification['targets'] if i != ordering_column]
 
     dataframes = {}
     preprocessors = {}
@@ -146,8 +146,8 @@ def fit_forecast_preprocess(dataframe, problem_specification, train_specificatio
         treatment_data, mapping_dic = format_dataframe_order_index(
             dataframe_split[treatment_name],
             is_date=problem_specification['is_temporal'],
-            date_format=problem_specification['date_format'],
-            order_column=time
+            date_format=problem_specification['date_format'].get(ordering_column),
+            order_column=ordering_column
         )
         if exog_names:
             exog, preprocess_exog = preprocess(
@@ -247,7 +247,7 @@ def fit_model_ar(dataframes, model_specification, problem_specification):
     @param problem_specification:
     """
 
-    time = next(iter(problem_specification.get('time', [])), None)
+    ordering_column = problem_specification.get("forecastingHorizon", {}).get('column')
 
     models = {}
 
@@ -255,8 +255,9 @@ def fit_model_ar(dataframes, model_specification, problem_specification):
         try:
             treatment_data = dataframes[treatment_name]
             # print(treatment_data)
-            if time is None:
-                problem_specification['time'] = treatment_data['time'].name
+            if ordering_column is None:
+                problem_specification.setDefault('forecastingHorizon', {})
+                problem_specification['forecastingHorizon']['column'] = treatment_data['time'].name
 
             # freq = get_freq(
             #     granularity_specification=problem_specification.get('timeGranularity'),
@@ -298,7 +299,7 @@ def fit_model_var(dataframes, model_specification, problem_specification):
     @param problem_specification:
     """
 
-    time = next(iter(problem_specification.get('time', [])), None)
+    ordering_column = problem_specification.get("forecastingHorizon", {}).get('column')
 
     models = {}
 
@@ -307,8 +308,9 @@ def fit_model_var(dataframes, model_specification, problem_specification):
     for treatment_name in dataframes:
         try:
             treatment_data = dataframes[treatment_name]
-            if time is None:
-                problem_specification['time'] = treatment_data['time'].name
+            if ordering_column is None:
+                problem_specification.setDefault('forecastingHorizon', {})
+                problem_specification['forecastingHorizon']['column'] = treatment_data['time'].name
 
             freq = get_freq(
                 granularity_specification=problem_specification.get('timeGranularity'),
@@ -355,14 +357,15 @@ def fit_model_sarimax(dataframes, model_specification, problem_specification):
     @param problem_specification:
     """
 
-    time = next(iter(problem_specification.get('time', [])), None)
+    ordering_column = problem_specification.get("forecastingHorizon", {}).get('column')
 
     models = {}
 
     for treatment_name in dataframes:
         treatment_data = dataframes[treatment_name]
-        if time is None:
-            problem_specification['time'] = treatment_data['time'].name
+        if ordering_column is None:
+            problem_specification.setDefault('forecastingHorizon', {})
+            problem_specification['forecastingHorizon']['column'] = treatment_data['time'].name
 
         # freq = get_freq(
         #     granularity_specification=problem_specification.get('timeGranularity'),
@@ -441,7 +444,7 @@ def fit_model_ar_ann(dataframes, model_specification, problem_specification):
     @param problem_specification:
     """
     # 'Y' variable is in the first column, AR only requires 'Y' value
-    time = next(iter(problem_specification.get('time', [])), None)
+    ordering_column = problem_specification.get("forecastingHorizon", {}).get('column')
     back_steps = model_specification.get('back_steps', 1)  # At least 1 time step is required
     loss_func = problem_specification.get('performanceMetric').get('metric')
     loss_func = 'MEAN_SQUARED_ERROR' if (not loss_func or loss_func not in _LOSS_FUNCTIONS) else loss_func
@@ -449,8 +452,9 @@ def fit_model_ar_ann(dataframes, model_specification, problem_specification):
 
     for treatment_name in dataframes:
         treatment_data = dataframes[treatment_name]
-        if time is None:
-            problem_specification['time'] = treatment_data['time'].name
+        if ordering_column is None:
+            problem_specification.setDefault('forecastingHorizon', {})
+            problem_specification['forecastingHorizon']['column'] = treatment_data['time'].name
 
         # Only considering endogenous features now
         if treatment_data['exogenous']:
@@ -496,7 +500,7 @@ def fit_model_var_ann(dataframes, model_specification, problem_specification):
     """
     # Assume the dataframes is already in order
     # 'Y' variable is in the first column, AR only requires 'Y' value
-    time = next(iter(problem_specification.get('time', [])), None)
+    ordering_column = problem_specification.get("forecastingHorizon", {}).get('column')
     back_steps = model_specification.get('back_steps', 1)  # At least 1 time step is required
     loss_func = problem_specification.get('performanceMetric').get('metric')
     loss_func = 'MEAN_SQUARED_ERROR' if (not loss_func or loss_func not in _LOSS_FUNCTIONS) else loss_func
@@ -505,8 +509,9 @@ def fit_model_var_ann(dataframes, model_specification, problem_specification):
 
     for treatment_name in dataframes:
         treatment_data = dataframes[treatment_name]
-        if time is None:
-            problem_specification['time'] = treatment_data['time'].name
+        if ordering_column is None:
+            problem_specification.setDefault('forecastingHorizon', {})
+            problem_specification['forecastingHorizon']['column'] = treatment_data['time'].name
 
         # Only considering endogenous features now
         if treatment_data['exogenous']:
@@ -572,13 +577,15 @@ def factory_fit_traditional(method_name):
         @param model_specification:
         @param problem_specification:
         """
-        time = next(iter(problem_specification.get('time', [])), None)
+        ordering_column = problem_specification.get("forecastingHorizon", {}).get('column')
+
         models = dict()
 
         for treatment_name in dataframes:
             treatment_data = dataframes[treatment_name]
-            if time is None:
-                problem_specification['time'] = treatment_data['time'].name
+            if ordering_column is None:
+                problem_specification.setDefault('forecastingHorizon', {})
+                problem_specification['forecastingHorizon']['column'] = treatment_data['time'].name
 
             # Only considering endogenous features now
             if treatment_data['exogenous']:

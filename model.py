@@ -129,7 +129,7 @@ class SciKitLearnWrapper(BaseModelWrapper):
 
     def forecast(self, dataframe, forecast_len, forecast_mode='test'):
         cross_section_names = self.problem_specification.get('crossSection', [])
-        time_name = next(iter(self.problem_specification.get('time', [])), None)
+        ordering_column = self.problem_specification.get("forecastingHorizon", {}).get('column')
         index_names = self.problem_specification.get('indexes', ['d3mIndex'])
         target_names = self.problem_specification['targets']
 
@@ -151,7 +151,7 @@ class SciKitLearnWrapper(BaseModelWrapper):
                 treatment,
                 is_date=self.problem_specification['is_temporal'],
                 date_format=self.problem_specification['date_format'],
-                order_column=time_name,
+                order_column=ordering_column,
                 freq=model._index.freq
             )
             treatment = treatment.head(forecast_len)
@@ -162,9 +162,9 @@ class SciKitLearnWrapper(BaseModelWrapper):
             treatment.drop([eachIndex for eachIndex in index_names if eachIndex in treatment.columns],
                            inplace=True, axis=1)
 
-            if mapping_dic and time_name in treatment.columns:
+            if mapping_dic and ordering_column in treatment.columns:
                 # Dummy dateTimeIndex is activated, the original order-column should be dropped.
-                treatment.drop(time_name, inplace=True, axis=1)
+                treatment.drop(ordering_column, inplace=True, axis=1)
             index.reset_index(drop=True, inplace=True)
             dataframe_len, history_len = len(treatment.index), len(model._index)
 
@@ -368,12 +368,11 @@ class StatsModelsWrapper(BaseModelWrapper):
 
     def predict(self, dataframe):
         cross_section_names = self.problem_specification.get('crossSection', [])
-        time_name = next(iter(self.problem_specification.get('time', [])), None)
+        ordering_column = self.problem_specification.get("forecastingHorizon", {}).get('column')
         index_names = self.problem_specification.get('indexes', ['d3mIndex'])
         target_names = self.problem_specification['targets']
         # Default length is 10
-        forecast_length = self.problem_specification.get('forecastingHorizon', {"value": 10})
-        forecast_length = forecast_length.get('value', 10)
+        forecast_length = self.problem_specification.get('forecastingHorizon', {}).get('value', 10)
 
         treatments_data = split_time_series(dataframe=dataframe, cross_section_names=cross_section_names)
         predictions = []
@@ -394,7 +393,7 @@ class StatsModelsWrapper(BaseModelWrapper):
 
             treatment, _ = format_dataframe_order_index(
                 treatment,
-                order_column=time_name,
+                order_column=ordering_column,
                 is_date=self.problem_specification['is_temporal'],
                 date_format=self.problem_specification['date_format'],
                 freq=model.model._index.freq
@@ -402,8 +401,8 @@ class StatsModelsWrapper(BaseModelWrapper):
 
             treatment.reset_index(inplace=True)
 
-            start = treatment[time_name].iloc[0]
-            end = treatment[time_name].iloc[-1]
+            start = treatment[ordering_column].iloc[0]
+            end = treatment[ordering_column].iloc[-1]
             # end = treatment[time_name].iloc[-1] if len(treatment) > forecast_length \
             #     else treatment[time_name].iloc[forecast_length-1]
 
@@ -430,11 +429,11 @@ class StatsModelsWrapper(BaseModelWrapper):
                         predict
                     ])
                 # index name is missing
-                predict.index.name = time_name
+                predict.index.name = ordering_column
                 predict.reset_index()
 
             if self.pipeline_specification['model']['strategy'] == 'VAR':
-                endog_target_names = [i for i in self.problem_specification['targets'] if i != time_name]
+                endog_target_names = [i for i in self.problem_specification['targets'] if i != ordering_column]
 
                 start_model = min(max(start, model.model._index[model.k_ar]), model.model._index[-1])
                 end_model = max(start_model, end)
@@ -460,7 +459,7 @@ class StatsModelsWrapper(BaseModelWrapper):
 
                 # print('date range: ', start, end)
                 # print('model range: ', start_model, end_model)
-                predict[time_name] = new_time_index
+                predict[ordering_column] = new_time_index
 
                 if start_model > start:
                     # print('prepending data from before range')
@@ -473,13 +472,13 @@ class StatsModelsWrapper(BaseModelWrapper):
                 if start_model < start:
                     # print(predict)
                     # print('removing data from below the asked-for-interval, but was forecasted')
-                    predict = predict[predict[time_name] >= start]
+                    predict = predict[predict[ordering_column] >= start]
                     # print(predict)
 
             if self.pipeline_specification['model']['strategy'].startswith('SARIMAX'):
                 all = self.problem_specification['targets'] + self.problem_specification['predictors']
                 exog_names = [i for i in self.problem_specification.get('exogenous', []) if i in all]
-                endog = [i for i in all if i not in exog_names and i != time_name]
+                endog = [i for i in all if i not in exog_names and i != ordering_column]
 
                 predict = pd.DataFrame(
                     data=model.predict(start, end),
@@ -515,7 +514,7 @@ class StatsModelsWrapper(BaseModelWrapper):
 
     def forecast(self, dataframe, forecast_len=None, forecast_mode='test'):
         cross_section_names = self.problem_specification.get('crossSection', [])
-        time_name = next(iter(self.problem_specification.get('time', [])), None)
+        ordering_column = self.problem_specification.get("forecastingHorizon", {}).get('column')
         index_names = self.problem_specification.get('indexes', ['d3mIndex'])
         target_names = self.problem_specification['targets']
 
@@ -535,7 +534,7 @@ class StatsModelsWrapper(BaseModelWrapper):
 
             treatment, _ = format_dataframe_order_index(
                 treatment,
-                order_column=time_name,
+                order_column=ordering_column,
                 is_date=self.problem_specification['is_temporal'],
                 date_format=self.problem_specification['date_format'],
                 freq=model.model._index.freq
@@ -568,11 +567,11 @@ class StatsModelsWrapper(BaseModelWrapper):
                         end=len(treatment.index) - 1
                     ).to_frame(name=self.problem_specification['targets'][0])
 
-                predict.index.name = time_name
+                predict.index.name = ordering_column
                 predict.reset_index()
 
             if self.pipeline_specification['model']['strategy'] == 'VAR':
-                endog_target_names = [i for i in self.problem_specification['targets'] if i != time_name]
+                endog_target_names = [i for i in self.problem_specification['targets'] if i != ordering_column]
 
                 if 'test' == forecast_mode:
                     predict = model.model.predict(
@@ -606,7 +605,7 @@ class StatsModelsWrapper(BaseModelWrapper):
                 all = self.problem_specification['targets'] + self.problem_specification['predictors']
                 all = [item for item in all if item not in cross_section_names]
                 exog_names = [i for i in self.problem_specification.get('exogenous', []) if i in all]
-                endog = [i for i in all if i not in exog_names and i != time_name]
+                endog = [i for i in all if i not in exog_names and i != ordering_column]
 
                 if 'test' == forecast_mode:
                     predict = pd.DataFrame(

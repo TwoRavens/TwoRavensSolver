@@ -60,7 +60,7 @@ strategies = {
             {"strategy": "GRADIENT_BOOSTING_CLASSIFIER", "library": "sklearn"},
             {"strategy": "LINEAR_DISCRIMINANT_ANALYSIS", "library": "sklearn"},
             {"strategy": "QUADRATIC_DISCRIMINANT_ANALYSIS", "library": "sklearn"},
-            {"strategy": "GAUSSIAN_PROCESS_CLASSIFIER", "library": "sklearn"},
+            # {"strategy": "GAUSSIAN_PROCESS_CLASSIFIER", "library": "sklearn"},
             {"strategy": "MULTINOMIAL_NAIVE_BAYES", "library": "sklearn"},
             {"strategy": "GAUSSIAN_NAIVE_BAYES", "library": "sklearn"},
             {"strategy": "COMPLEMENT_NAIVE_BAYES", "library": "sklearn"},
@@ -82,7 +82,7 @@ strategies = {
             {"strategy": "GRADIENT_BOOSTING_CLASSIFIER", "library": "sklearn"},
             {"strategy": "LINEAR_DISCRIMINANT_ANALYSIS", "library": "sklearn"},
             {"strategy": "QUADRATIC_DISCRIMINANT_ANALYSIS", "library": "sklearn"},
-            {"strategy": "GAUSSIAN_PROCESS_CLASSIFIER", "library": "sklearn"},
+            # {"strategy": "GAUSSIAN_PROCESS_CLASSIFIER", "library": "sklearn"},
             {"strategy": "MULTINOMIAL_NAIVE_BAYES", "library": "sklearn"},
             {"strategy": "GAUSSIAN_NAIVE_BAYES", "library": "sklearn"},
             {"strategy": "COMPLEMENT_NAIVE_BAYES", "library": "sklearn"},
@@ -115,7 +115,7 @@ strategies = {
             {"strategy": "ORTHOGONAL_MATCHING", "library": "sklearn"},
             {"strategy": "ADABOOST_REGRESSOR", "library": "sklearn"},
             {"strategy": "GRADIENT_BOOSTING_REGRESSOR", "library": "sklearn"},
-            {"strategy": "GAUSSIAN_PROCESS_REGRESSOR", "library": "sklearn"},
+            # {"strategy": "GAUSSIAN_PROCESS_REGRESSOR", "library": "sklearn"},
             {"strategy": "RIDGE_CV", "library": "sklearn"},
         ]
     }

@@ -22,7 +22,13 @@ problems = {
                 "taskType": "FORECASTING",
                 "predictors": [],
                 "targets": ['Sales'],
-                "time": ["Month"]
+                "forecastingHorizon": {
+                    "column": "Month",
+                    "value": 10
+                },
+                "time_format": {
+                    "Month": "%m"
+                }
             },
             "input": {
                 "name": "in-sample",
@@ -43,7 +49,13 @@ problems = {
                 "taskType": "FORECASTING",
                 "predictors": [],
                 "targets": ['sunspots'],
-                "time": ["year-month"]
+                "forecastingHorizon": {
+                    "column": "year-month",
+                    "value": 10
+                },
+                "time_format": {
+                    "Month": "%Y-%m"
+                }
             },
             "input": {
                 "name": "in-sample",
@@ -64,7 +76,10 @@ problems = {
                 "taskType": "FORECASTING",
                 "predictors": ["T1", "T2"],
                 "targets": ['Appliances'],
-                "time": ["date"]
+                "forecastingHorizon": {
+                    "column": "date",
+                    "value": 10
+                }
             },
             "input": {
                 "name": "in-sample",
