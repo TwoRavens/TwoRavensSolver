@@ -146,7 +146,7 @@ def fit_forecast_preprocess(dataframe, problem_specification, train_specificatio
         treatment_data, mapping_dic = format_dataframe_order_index(
             dataframe_split[treatment_name],
             is_date=problem_specification['is_temporal'],
-            date_format=problem_specification['date_format'].get(ordering_column),
+            date_format=problem_specification.get('date_format', {}).get(ordering_column),
             order_column=ordering_column
         )
         if exog_names:
