@@ -1,164 +1,81 @@
 import os
-from dateutil import parser
+from datetime import datetime
 
+import numpy as np
 import pandas as pd
+from dateutil import parser
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
-import numpy as np
-from datetime import datetime
+from sklearn.utils.validation import check_is_fitted
+
+pd.options.mode.chained_assignment = 'raise'
+
+DEFAULT_INDEX = 'd3mIndex'
 
 
 def filter_args(arguments, intersect):
     return {k: arguments[k] for k in intersect if k in arguments}
 
 
-def format_dataframe_time_index(dataframe, date=None, granularity_specification=None, freq=None, date_format=None):
+def format_dataframe_time_index(
+        dataframe,
+        order_column=None,
+        time_format=None,
+        start_dummy='1900-1-1'):
     """
     Ensure dataframe index is of type pd.DatetimeIndex on the date column
-    @param dataframe: arbitrarily indexed dataframe
-    @param date: optional column name to turn into date index
-    @param granularity_specification: freq in d3m format
+    :param dataframe: arbitrarily indexed dataframe
+    :param order_column: optional column name to turn into date index
+    :param start_dummy:
+    :param time_format: if truthy, consider data is_date
     """
 
     # Sanity check
-    if date is None and date_format:
-        raise ValueError('date_format must be None when date is None')
+    if order_column is None and time_format:
+        raise ValueError('time_format must be None when date is None')
 
     # Create dummy date index if date is not given
-    if date is None:
-        date = 'ravensDateIndex'
-        while date in dataframe:
-            date += '_'
+    if order_column is None:
+        order_column = 'ravensDateIndex'
+        while order_column in dataframe:
+            order_column += '_'
 
     # Attempt to parse given date column
-    if date in dataframe:
-        # Date format is not available from the preprocessor
-        if not date_format:
-            try:
-                dataframe[date] = dataframe[date].astype(str).apply(parser.parse)
-                # not flexible enough
-                return resample_dataframe_time_index(
-                    dataframe=dataframe,
-                    date=date,
-                    freq=freq or get_freq(granularity_specification=granularity_specification))
-            except ValueError:
-                pass
-        else:
-            try:
-                # Trying to parse the input string with given format
-                dataframe[date] = dataframe[date].astype(str).apply(lambda x: get_date(x, date_format))
-                return resample_dataframe_time_index(
-                    dataframe=dataframe,
-                    date=date,
-                    freq=freq or get_freq(granularity_specification=granularity_specification))
-            except ValueError:
-                # Fall back to no format version
-                try:
-                    dataframe[date] = dataframe[date].astype(str).apply(parser.parse)
-                    # not flexible enough
-                    return resample_dataframe_time_index(
-                        dataframe=dataframe,
-                        date=date,
-                        freq=freq or get_freq(granularity_specification=granularity_specification))
-                except ValueError:
-                    pass
+    if order_column in dataframe and time_format:
+        try:
+            # Attempt to parse the input string with given format
+            dataframe[order_column] = dataframe[order_column].astype(str).apply(lambda x: get_date(x, time_format))
+            dataframe.set_index(order_column, inplace=True)
+            return dataframe
+        except ValueError:
+            print(f"Failed to parse order column with the given time_format: {time_format}")
+            pass
+
+        # Date format from the preprocessor is not available, or fails to parse
+        try:
+            dataframe[order_column] = dataframe[order_column].astype(str).apply(parser.parse)
+            dataframe.set_index(order_column, inplace=True)
+            return dataframe
+        except ValueError:
+            pass
 
     # if there was a spec, but no valid date column to apply it to, then ignore it
-    dataframe[date] = pd.date_range('1900-1-1', periods=len(dataframe), freq='D')
-    return dataframe.set_index(date)
+    dataframe[order_column] = pd.date_range(start_dummy, periods=len(dataframe), freq='D')
+    dataframe.set_index(order_column, inplace=True)
+    return dataframe
 
 
-# New function for general ordered dataframe
-def format_dataframe_order_index(dataframe, order_column=None, is_date=True, date_format=None,
-                                 granularity_specification=None, freq=None, start_dummy='1900-1-1'):
-    """
-    Ensure dataframe index is of type pd.DatetimeIndex (if is_date is True) on the date column
-    Otherwise, the index is of type pd.RangeIndex -- Only numerical value is supported
-
-    @param dataframe: arbitrarily indexed dataframe
-    @param order_column: optional column name to turn into date index
-    @param is_date: boolean flag that denotes the index type
-    @param date_format: date format from 2ravens_preprocessor
-    @param granularity_specification: freq in d3m format
-    @param freq: frequency for the given column, optional
-    @param start_dummy: the start date of dummy index,
-    """
-
-    # Sanity check
-    if order_column is None and date_format:
-        raise ValueError('date_format must be None when date is None')
-
-    # order_column would never be None, based on the front-end implementation
-    # if order_column is None or order_column == 'd3mIndex':
-    #     order_column = 'ravensDateIndex'
-    #     while order_column in dataframe:
-    #         order_column += '_'
-
-    # Attempt to parse given date column
-    if order_column in dataframe:
-        if is_date:
-            # Try parse the dateTimeIndex using given format first
-            if date_format:
-                try:
-                    dataframe[order_column] = dataframe[order_column].astype(str).apply(
-                        lambda x: get_date(x, date_format))
-                    return resample_dataframe_time_index(
-                        dataframe=dataframe,
-                        date=order_column,
-                        freq=freq or get_freq(granularity_specification=granularity_specification)
-                    ), None
-                except ValueError:
-                    pass
-
-            # Guess the dateTimeIndex if format is not given, or parse failed with given format
-            try:
-                dataframe[order_column] = dataframe[order_column].astype(str).apply(parser.parse)
-                return resample_dataframe_time_index(
-                    dataframe=dataframe,
-                    date=order_column,
-                    freq=freq or get_freq(granularity_specification=granularity_specification)), None
-            except ValueError:
-                pass
-
-    # if there was a spec, but no valid date column to apply it to, then ignore it
-    # All parse branch failed, go for dummy dateIndex
-    dummy_column = 'ravensDateIndex'
-    while dummy_column in dataframe:
-        dummy_column += '_'
-
-    dummy_series = pd.date_range(start_dummy, periods=len(dataframe), freq='D')
-
-    dataframe.insert(0, dummy_column, dummy_series)
-
-    mapping_dic = {
-        'start': [dataframe[dummy_column][0], dataframe[order_column][0]],
-        'end': [dataframe[dummy_column][len(dataframe)-1], dataframe[order_column][len(dataframe)-1]],
-        'index': dummy_column
-    }
-
-    # raise Exception(mapping_dic)
-
-    dataframe = dataframe.set_index(dummy_column)
-
-    return dataframe, mapping_dic
-    #
-    # if is_date:
-    #     return dataframe, None
-    # else:
-    #     return dataframe, mapping_dic
-
-
-def resample_dataframe_time_index(dataframe, date, freq=None):
+def resample_dataframe_time_index(dataframe, freq=None, index_name=DEFAULT_INDEX):
     """
     Creates a regular time series, optionally at the specified freq
-    @param dataframe:
-    @param date:
-    @param freq:
-    @return:
+    :param dataframe:
+    :param freq:
+    :param index_name:
+    :return
     """
-    temporal_series = dataframe[date]
+    temporal_series = dataframe.index
     estimated_freq = get_freq(series=temporal_series)
     # print(estimated_freq)
 
@@ -168,11 +85,10 @@ def resample_dataframe_time_index(dataframe, date, freq=None):
 
     # if time series is regular and freq happens to match
     if pd.infer_freq(temporal_series) and approx_seconds(freq) == approx_seconds(estimated_freq):
-        return dataframe.set_index(date)
+        return dataframe
 
     freq = freq or estimated_freq
 
-    dataframe = dataframe.set_index(date)
     dataframe_temp = dataframe.resample(freq).mean()
 
     numeric_columns = list(dataframe.select_dtypes(include=[np.number]).columns.values)
@@ -190,17 +106,17 @@ def resample_dataframe_time_index(dataframe, date, freq=None):
     ]).fit_transform(dataframe_temp), index=dataframe_temp.index, columns=dataframe_temp.columns)
 
     # no imputations on index column
-    if 'd3mIndex' in dataframe_temp:
-        dataframe_imputed['d3mIndex'] = dataframe_temp['d3mIndex']
+    if index_name in dataframe_temp:
+        dataframe_imputed[index_name] = dataframe_temp[index_name]
     return dataframe_imputed
 
 
 def get_freq(series=None, granularity_specification=None):
     """
     Infer observation frequency given d3m metadata or data
-    @param granularity_specification: https://gitlab.com/datadrivendiscovery/data-supply/blob/4d67a8acee3fe5236900137a528bc48cf05731a3/schemas/datasetSchema.json#L101
-    @param series: https://pandas.pydata.org/pandas-docs/version/0.17.0/generated/pandas.infer_freq.html
-    @return: observation frequency
+    :param granularity_specification: https://gitlab.com/datadrivendiscovery/data-supply/blob/4d67a8acee3fe5236900137a528bc48cf05731a3/schemas/datasetSchema.json#L101
+    :param series: https://pandas.pydata.org/pandas-docs/version/0.17.0/generated/pandas.infer_freq.html
+    :return observation frequency
     """
     d3m_granularity_units = {
         "seconds": "S",
@@ -235,7 +151,8 @@ def get_freq(series=None, granularity_specification=None):
     # }
     # infer frequency from every three-pair of records
     candidate_frequencies = set()
-    for i in range(len(series) - 3):
+    # TODO: spread out samples if series length longer than 100
+    for i in range(min(len(series) - 3, 100)):
         candidate_frequency = pd.infer_freq(series[i:i + 3])
         if candidate_frequency:
             # for unit in business_units:
@@ -246,8 +163,8 @@ def get_freq(series=None, granularity_specification=None):
     if not candidate_frequencies:
         return
 
-    # sort inferred frequency by approximate time durations, select shortest
-    return sorted([(i, approx_seconds(i)) for i in candidate_frequencies], key=lambda x: x[1])[0][0]
+    # approximately select shortest inferred frequency
+    return min(candidate_frequencies, key=approx_seconds)
 
 
 def get_date(value, time_format=None):
@@ -260,8 +177,8 @@ def get_date(value, time_format=None):
 def approx_seconds(offset):
     """
     Attempt to approximate the number of seconds in the duration of a DateOffset
-    @param offset: pandas DateOffset instance
-    @return: float seconds
+    :param offset: pandas DateOffset instance
+    :return float seconds
     """
     if not offset:
         return
@@ -305,14 +222,19 @@ class Dataset(object):
 
 
 def preprocess(dataframe, specification, X=None, y=None):
+    assert len(specification['problem']['targets']) == 1
 
     X = X if X else specification['problem']['predictors']
     y = y if y else specification['problem']['targets'][0]
+
     nominal = [i for i in specification['problem'].get('categorical', []) if i in X]
     dataframe[nominal] = dataframe[nominal].astype(str)
 
-    categorical_features = [i for i in set(nominal +
-                            list(dataframe.select_dtypes(exclude=[np.number, "bool_", "object_"]).columns.values))
+    # list columns that must be numeric, according to the datatype
+    categorical_dtype_features = list(dataframe.select_dtypes(exclude=[np.number, "bool_", "object_"]).columns.values)
+    # union categorical dtype features with features the user has explicitly labeled as categorical
+    categorical_features = [i for i in set(nominal + categorical_dtype_features)
+                            # must not be a target, must be a predictor
                             if i != y and i in X]
 
     # print('preprocess X', X)
@@ -350,15 +272,17 @@ def preprocess(dataframe, specification, X=None, y=None):
     stimulus = dataframe[X]
     stimulus = preprocessor.fit_transform(stimulus)
 
+    set_column_transformer_inverse_transform(preprocessor, len(numerical_features))
+
     return stimulus, preprocessor
 
 
 def split_time_series(dataframe, cross_section_names=None):
     """
     break a dataframe with cross sectional indicators into a dict of dataframes containing each treatment
-    @param dataframe:
-    @param cross_section_names: column names of cross sectional variables
-    @return:
+    :param dataframe:
+    :param cross_section_names: column names of cross sectional variables
+    :return
     """
 
     # avoid unecessary data re-allocation
@@ -371,3 +295,21 @@ def split_time_series(dataframe, cross_section_names=None):
         content[eachGroup].reset_index(drop=True, inplace=True)
     return content
     # return {label: data[others] for label, data in dataframe.groupby(cross_section_names)}
+
+
+def set_column_transformer_inverse_transform(transformer, num_numerical_features):
+
+    if not isinstance(transformer, ColumnTransformer):
+        raise ValueError('expected ColumnTransformer when setting inverse_transform')
+    if len(transformer.transformers) != 2:
+        raise ValueError('ColumnTransformer inverse_transform hack only works with 2 transformers')
+
+    def fixed_column_transformer_inverse_transform(data):
+
+        print(transformer.transformers_[0][1].steps[1][1])
+        numerical = pd.DataFrame(transformer.transformers_[0][1].steps[1][1].inverse_transform(data.iloc[:, :num_numerical_features]))
+        # categorical = transformer.transformers[1][1].inverse_transform(data.iloc[:, num_numerical_features:])
+        categorical = pd.DataFrame(data.iloc[:, num_numerical_features:])
+        return pd.concat([numerical, categorical], axis=1)
+
+    setattr(transformer, 'inverse_transform', fixed_column_transformer_inverse_transform)

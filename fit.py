@@ -1,9 +1,8 @@
-from .utilities import Dataset, preprocess
+from .utilities import Dataset, preprocess, format_dataframe_time_index, resample_dataframe_time_index
 
 from .utilities import (
     filter_args,
     get_freq,
-    format_dataframe_order_index,
     split_time_series
 )
 
@@ -25,6 +24,8 @@ import pandas as pd
 import numpy as np
 import inspect
 
+pd.options.mode.chained_assignment = 'raise'
+
 
 _LOSS_FUNCTIONS = {
     'MEAN_SQUARED_ERROR': 'squared_loss',
@@ -33,62 +34,37 @@ _LOSS_FUNCTIONS = {
 }
 
 
-# given a pipeline json and data, return a solution
 def fit_pipeline(pipeline_specification, train_specification):
-    # 1. load data
-    dataframe = Dataset(train_specification['input']).get_dataframe()
+    """
+    fit and wrap a model based on json descriptions of the expected model, problem, and data pointer
+
+    :param pipeline_specification: loose model description
+    :param train_specification: metadata about the problem, metric to use, dataset location
+    :return: model wrapped in standard interface
+    """
+
     problem_specification = train_specification['problem']
 
-    # Add performanceMetric into train_specification
+    # performanceMetric is relevant in situations where only problem_specification is known
     loss_name = train_specification.get("performanceMetric", {'metric': "MEAN_SQUARED_ERROR"})
     problem_specification['performanceMetric'] = loss_name
 
-    # Test code for dummy preprocessor return
-    if 'is_temporal' not in problem_specification:
-        problem_specification['is_temporal'] = False
-    if 'data_format' not in problem_specification:
-        problem_specification['date_format'] = None
+    # 1. load data
+    dataframe = Dataset(train_specification['input']).get_dataframe()
 
-    weights = problem_specification.get('weights')
-    if weights and weights[0] in problem_specification['predictors']:
-        problem_specification['predictors'].remove(weights[0])
-
-    ordering_column = problem_specification.get('forecastingHorizon', {}).get('column')
-    if ordering_column and ordering_column in problem_specification['predictors']:
-        problem_specification['predictors'].remove(ordering_column)
-
-    # drop null values in the target column
-    dataframe = dataframe[dataframe[problem_specification['targets']].notnull().all(1)]
-
-    if problem_specification['taskType'] == 'FORECASTING':
-        dataframes, preprocessors = fit_forecast_preprocess(dataframe, problem_specification,
-                                                            train_specification, weights)
-    else:
-        stimulus, preprocessor = fit_preprocess(
-            dataframe[problem_specification['predictors']],
-            pipeline_specification['preprocess'],
-            train_specification)
-
-        dataframes = {
-            'targets': dataframe[problem_specification['targets']] if problem_specification['targets'] else None,
-            'predictors': stimulus if problem_specification['predictors'] else None,
-        }
-        preprocessors = {
-            'predictors': preprocessor
-        }
-
-        dataframes['weight'] = dataframe[weights[0]] if weights else None
+    # 2. preprocess data
+    dataframes, preprocessors = fit_preprocess(
+        dataframe,
+        pipeline_specification['preprocess'],
+        train_specification)
 
     # 3. modeling
     model_specification = pipeline_specification['model']
-    model_specification['probability'] = True  # Aux operation for Sklearn-SVC
     model = fit_model(dataframes, model_specification, problem_specification)
 
-    # model_specification['library'] = 'statsmodels'
-
     # 4. wrap and save
-    from .model import StatsModelsWrapper, SciKitLearnWrapper
     if model_specification['library'] == 'statsmodels':
+        from tworaven_solver.libraries.library_statsmodels import StatsModelsWrapper
         return StatsModelsWrapper(
             pipeline_specification=pipeline_specification,
             problem_specification=problem_specification,
@@ -96,6 +72,7 @@ def fit_pipeline(pipeline_specification, train_specification):
             preprocessors=preprocessors)
 
     if model_specification['library'] == 'sklearn':
+        from tworaven_solver.libraries.library_sklearn import SciKitLearnWrapper
         return SciKitLearnWrapper(
             pipeline_specification=pipeline_specification,
             problem_specification=problem_specification,
@@ -110,78 +87,113 @@ def fit_pipeline(pipeline_specification, train_specification):
     #         preprocessors=preprocessors)
 
 
-def fit_preprocess(dataframe, preprocess_specification, train_specification):
-    # TODO: more varied preprocessing based on preprocess specification
-    return preprocess(dataframe, train_specification)
-    # if preprocess_specification == 'STANDARD':
-    #     pass
-    # else:
-    #     raise ValueError('Unrecognized preprocess specification')
+def fit_preprocess(
+        dataframe,
+        preprocess_specification,
+        train_specification):
+    """
+    fit and transform data in preparation for fitting a machine learning model
 
+    :param dataframe: pandas dataframe
+    :param preprocess_specification: expected preprocessing metadata
+    :param train_specification: description of the
+    :return:
+    """
+    problem_specification = train_specification['problem']
 
-def fit_forecast_preprocess(dataframe, problem_specification, train_specification, weights):
-    # Move the inner block here, so it can be used by ta2_interface
-    # returns a dict of dataframes, one for each treatment, one observation per time unit
-    dataframe_split = split_time_series(
-        dataframe=dataframe,
-        cross_section_names=problem_specification.get('crossSection', []))
+    weights = problem_specification.get('weights')
+    if weights and weights[0] in problem_specification['predictors']:
+        problem_specification['predictors'].remove(weights[0])
 
-    ordering_column = problem_specification.get("forecastingHorizon", {}).get('column')
+    ordering_column = problem_specification.get('forecastingHorizon', {}).get('column')
+    if ordering_column and ordering_column in problem_specification['predictors']:
+        problem_specification['predictors'].remove(ordering_column)
 
-    # targets cannot be exogenous, subset exogenous labels to the predictor set
-    exog_names = [i for i in problem_specification.get('exogenous', []) if
-                  i in problem_specification['predictors'] and
-                  i not in problem_specification.get('crossSection', [])]
-    # print('exog_names', exog_names)
-    # target variables are not transformed, all other variables are transformed
-    endog_non_target_names = [i for i in problem_specification['predictors'] if
-                              i not in exog_names and i != ordering_column and
-                              i not in problem_specification.get('crossSection', [])]
-    endog_target_names = [i for i in problem_specification['targets'] if i != ordering_column]
+    # drop null values in the target column
+    dataframe = dataframe[dataframe[problem_specification['targets']].notnull().all(1)]
 
-    dataframes = {}
-    preprocessors = {}
+    if problem_specification['taskType'] == 'FORECASTING':
+        # returns a dict of dataframes, one for each treatment, one observation per time unit
+        dataframe_split = split_time_series(
+            dataframe=dataframe,
+            cross_section_names=problem_specification.get('crossSection', []))
 
-    for treatment_name in dataframe_split:
-        treatment_data, mapping_dic = format_dataframe_order_index(
-            dataframe_split[treatment_name],
-            is_date=problem_specification['is_temporal'],
-            date_format=problem_specification.get('date_format', {}).get(ordering_column),
-            order_column=ordering_column
-        )
-        if exog_names:
-            exog, preprocess_exog = preprocess(
-                treatment_data[exog_names],
-                train_specification,
-                X=exog_names)
-        else:
-            exog, preprocess_exog = None, None
+        ordering_column = problem_specification.get("forecastingHorizon", {}).get('column')
 
-        if endog_non_target_names:
-            endog_non_target, preprocess_endog = preprocess(
-                treatment_data[endog_non_target_names],
-                train_specification,
-                X=endog_non_target_names)
+        # targets cannot be exogenous, subset exogenous labels to the predictor set
+        exogenous_names = [i for i in problem_specification.get('exogenous', []) if
+                           i in problem_specification['predictors'] and
+                           i not in problem_specification.get('crossSection', [])]
 
-            endog = pd.concat([
-                treatment_data[endog_target_names],
-                pd.DataFrame(endog_non_target, index=treatment_data.index)],
-                axis=1)
-        else:
-            endog, preprocess_endog = treatment_data[endog_target_names], None
+        # target variables are not transformed, all other variables are transformed
+        endog_non_target_names = [i for i in problem_specification['predictors'] if
+                                  i not in exogenous_names and
+                                  i != ordering_column and
+                                  i not in problem_specification.get('crossSection', [])]
+        endog_target_names = [i for i in problem_specification['targets'] if i != ordering_column]
 
-        dataframes[treatment_name] = {
-            'exogenous': exog,
-            'endogenous': endog,
-            'time': treatment_data.index,
-            'weight': treatment_data[weights[0]] if weights else None,
-            'tgt_names': endog_target_names,
-            'index_mapping': mapping_dic
-        }
-        preprocessors[treatment_name] = {
-            'exogenous': preprocess_exog,
-            'endogenous': preprocess_endog
-        }
+        granularity_specification = problem_specification.get('timeGranularity')
+
+        dataframes = {}
+        preprocessors = {}
+
+        for treatment_name in dataframe_split:
+            treatment_data = format_dataframe_time_index(
+                dataframe_split[treatment_name],
+                order_column=ordering_column,
+                time_format=problem_specification.get('time_format', {}).get(ordering_column))
+
+            if preprocess_specification.get('resample'):
+                treatment_data = resample_dataframe_time_index(
+                    dataframe=treatment_data,
+                    freq=get_freq(granularity_specification=granularity_specification))
+
+            if exogenous_names:
+                exogenous, preprocess_exog = preprocess(
+                    treatment_data[exogenous_names],
+                    train_specification,
+                    X=exogenous_names)
+            else:
+                exogenous, preprocess_exog = None, None
+
+            if endog_non_target_names:
+                endog_non_target, preprocess_endog = preprocess(
+                    treatment_data[endog_non_target_names],
+                    train_specification,
+                    X=endog_non_target_names)
+
+                endogenous = pd.concat([
+                    treatment_data[endog_target_names],
+                    pd.DataFrame(endog_non_target, index=treatment_data.index)],
+                    axis=1)
+            else:
+                endogenous, preprocess_endog = treatment_data[endog_target_names], None
+
+            dataframes[treatment_name] = {
+                'exogenous': exogenous,
+                'endogenous': endogenous,
+                'time': treatment_data.index,
+                'weight': treatment_data[weights[0]] if weights else None,
+                'tgt_names': endog_target_names
+            }
+            preprocessors[treatment_name] = {
+                'preprocess_specification': preprocess_specification,
+                'exogenous': preprocess_exog,
+                'endogenous': preprocess_endog
+            }
+
+        return dataframes, preprocessors
+
+    stimulus, preprocessor = preprocess(dataframe, train_specification)
+
+    dataframes = {
+        'targets': dataframe[problem_specification['targets']] if problem_specification['targets'] else None,
+        'predictors': stimulus if problem_specification['predictors'] else None,
+        'weight': dataframe[weights[0]] if weights else None
+    }
+    preprocessors = {
+        'predictors': preprocessor
+    }
 
     return dataframes, preprocessors
 
@@ -242,9 +254,9 @@ def fit_model_ar(dataframes, model_specification, problem_specification):
     """
     Return a fitted autoregression model
 
-    @param dataframes:
-    @param model_specification: {'lags': int, ...}
-    @param problem_specification:
+    :param dataframes:
+    :param model_specification: {'lags': int, ...}
+    :param problem_specification:
     """
 
     ordering_column = problem_specification.get("forecastingHorizon", {}).get('column')
@@ -294,9 +306,9 @@ def fit_model_var(dataframes, model_specification, problem_specification):
     """
     Return a fitted vector autoregression model
 
-    @param dataframes:
-    @param model_specification: {'lags': int, ...}
-    @param problem_specification:
+    :param dataframes:
+    :param model_specification: {'lags': int, ...}
+    :param problem_specification:
     """
 
     ordering_column = problem_specification.get("forecastingHorizon", {}).get('column')
@@ -318,18 +330,12 @@ def fit_model_var(dataframes, model_specification, problem_specification):
 
             from statsmodels.tsa.vector_ar.var_model import VAR
 
-            # endog_mask = treatment_data['endogenous'].T.duplicated()
-            # print('xx')
-            # print(treatment_data['endogenous'])
             endog_mask = treatment_data['endogenous'].var(axis=0) > 0
-            # print(endog_mask)
             endog = treatment_data['endogenous'][endog_mask.index[endog_mask]].astype(float)
-            # print(endog.var(axis=0))
             # model_specification['drops'][treatment_name] = {'endogenous': endog_mask.tolist()}
             model_arguments = {'endog': endog}
 
             if treatment_data.get('exogenous'):
-                # exog_mask = treatment_data['exogenous'].T.duplicated()
                 exog_mask = treatment_data['exogenous'].var(axis=0) > 0
                 # model_specification['drops'][treatment_name] = exog_mask.tolist()
                 model_arguments['exog'] = treatment_data['exogenous'][exog_mask.index[exog_mask]].astype(float)
@@ -352,9 +358,9 @@ def fit_model_sarimax(dataframes, model_specification, problem_specification):
     """
     Return a fitted autoregression model
 
-    @param dataframes:
-    @param model_specification:
-    @param problem_specification:
+    :param dataframes:
+    :param model_specification:
+    :param problem_specification:
     """
 
     ordering_column = problem_specification.get("forecastingHorizon", {}).get('column')
@@ -401,18 +407,16 @@ def fit_model_sarimax(dataframes, model_specification, problem_specification):
 def factory_fit_model_sklearn(sklearn_class):
     """
     Return a function that will fit the provided class
-
-    @param dataframes:
-    @param model_specification:
-    @param problem_specification:
+    :param sklearn_class
     """
+
     def fit_model(dataframes, model_specification, problem_specification):
         """
         Return a fitted model
 
-        @param dataframes:
-        @param model_specification:
-        @param problem_specification:
+        :param dataframes:
+        :param model_specification:
+        :param problem_specification:
         """
         model = sklearn_class(
             **filter_args(
@@ -439,9 +443,9 @@ def factory_fit_model_sklearn(sklearn_class):
 def fit_model_ar_ann(dataframes, model_specification, problem_specification):
     """
     Return a fitted autoregression neural network model
-    @param dataframes: ordered by time index
-    @param model_specification: {'lags': int, ...}
-    @param problem_specification:
+    :param dataframes: ordered by time index
+    :param model_specification: {'lags': int, ...}
+    :param problem_specification:
     """
     # 'Y' variable is in the first column, AR only requires 'Y' value
     ordering_column = problem_specification.get("forecastingHorizon", {}).get('column')
@@ -494,9 +498,9 @@ def fit_model_ar_ann(dataframes, model_specification, problem_specification):
 def fit_model_var_ann(dataframes, model_specification, problem_specification):
     """
     Return a fitted autoregression model
-    @param dataframes:
-    @param model_specification: {'lags': int, ...}
-    @param problem_specification:
+    :param dataframes:
+    :param model_specification: {'lags': int, ...}
+    :param problem_specification:
     """
     # Assume the dataframes is already in order
     # 'Y' variable is in the first column, AR only requires 'Y' value
@@ -564,18 +568,15 @@ def factory_fit_traditional(method_name):
     """
     Return a function that will fit the provided class
 
-    @param dataframes:
-    @param model_specification:
-    @param problem_specification:
+    :param method_name
     """
-
     def fit_model(dataframes, model_specification, problem_specification):
         """
         Return a fitted model -- Seems only an scalar will do the job
 
-        @param dataframes:
-        @param model_specification:
-        @param problem_specification:
+        :param dataframes:
+        :param model_specification:
+        :param problem_specification:
         """
         ordering_column = problem_specification.get("forecastingHorizon", {}).get('column')
 

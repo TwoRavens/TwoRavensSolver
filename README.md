@@ -18,7 +18,7 @@ Noted that the first two are classes while the last one is a function, which wil
 
 ## ModelWrapper
 In order to be consistent with our TA3, the trained model must has same function signature as other TA2 system.
-Since our models are implemented using different package (e.g. Sklearn, statmodel, pytorch etc.), they have to be wrapped.
+Since our libraries are implemented using different package (e.g. Sklearn, statmodel, pytorch etc.), they have to be wrapped.
 
 > **note**
 >

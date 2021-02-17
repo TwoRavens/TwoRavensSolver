@@ -2,121 +2,121 @@
 strategies = {
     'FORECASTING': {
         'UNIVARIATE': [
-            {
-                'strategy': 'AR',
+            {'preprocess': {'resample': True}, 'model': {
+                'strategy': 'AUTOREG',
                 'library': 'statsmodels'
-            },
+            }},
             *[
-                {
+                {'preprocess': {'resample': True}, 'model': {
                     'strategy': 'SARIMAX_({},{},{})'.format(order[0], order[1], order[2]),
                     'library': 'statsmodels',
                     'order': order,
-                }
+                }}
                 for order in [(1, 0, 0), (1, 1, 1), (4, 1, 2), (2, 1, 0), (0, 1, 2), (0, 1, 1), (0, 2, 2)]
             ],
             *[
-                {
+                {'preprocess': {'resample': True}, 'model': {
                     'strategy': 'AR_NN',
                     'library': 'sklearn',
                     'back_steps': step,
-                } for step in [1, 2]
+                }} for step in [1, 2]
             ],
-            {'strategy': 'TRA_AVERAGE', 'library': 'sklearn'},
-            {'strategy': 'TRA_NAIVE', 'library': 'sklearn'},
-            {'strategy': 'TRA_DRIFT', 'library': 'sklearn'},
+            {'preprocess': {'resample': True}, 'model': {'strategy': 'TRA_AVERAGE', 'library': 'sklearn'}},
+            {'preprocess': {'resample': True}, 'model': {'strategy': 'TRA_NAIVE', 'library': 'sklearn'}},
+            {'preprocess': {'resample': True}, 'model': {'strategy': 'TRA_DRIFT', 'library': 'sklearn'}},
         ],
         'MULTIVARIATE': [
-            {
+            {'preprocess': {'resample': True}, 'model': {
                 'strategy': 'VAR',
                 'library': 'statsmodels'
-            },
+            }},
             *[
-                {
+                {'preprocess': {'resample': True}, 'model': {
                     'strategy': 'VAR_NN',
                     'library': 'sklearn',
                     'back_steps': step,
-                } for step in [1, 2, 3, 4]
+                }} for step in [1, 2, 3, 4]
             ],
-            {'strategy': 'TRA_AVERAGE', 'library': 'sklearn'},
-            {'strategy': 'TRA_NAIVE', 'library': 'sklearn'},
-            {'strategy': 'TRA_DRIFT', 'library': 'sklearn'},
+            {'preprocess': {'resample': True}, 'model': {'strategy': 'TRA_AVERAGE', 'library': 'sklearn'}},
+            {'preprocess': {'resample': True}, 'model': {'strategy': 'TRA_NAIVE', 'library': 'sklearn'}},
+            {'preprocess': {'resample': True}, 'model': {'strategy': 'TRA_DRIFT', 'library': 'sklearn'}},
         ]
     },
     'CLASSIFICATION': {
         'BINARY': [
-            {'strategy': 'LOGISTIC_REGRESSION', 'library': 'sklearn'},
+            {'preprocess': {}, 'model': {'strategy': 'LOGISTIC_REGRESSION', 'library': 'sklearn'}},
             *[
-                {
+                {'preprocess': {}, 'model': {
                     'strategy': 'RANDOM_FOREST',
                     'library': 'sklearn',
                     'n_estimators': n_estimators
-                } for n_estimators in [10, 100]
+                }} for n_estimators in [10, 100]
             ],
-            {'strategy': 'SUPPORT_VECTOR_CLASSIFIER', 'library': 'sklearn'},
-            {"strategy": "RIDGE_CLASSIFIER", 'library': 'sklearn'},
-            {"strategy": "RIDGE_CLASSIFIER_CV", 'library': 'sklearn'},
-            {"strategy": "K_NEIGHBORS_CLASSIFIER", 'library': 'sklearn'},
-            {"strategy": "DECISION_TREE_CLASSIFIER", 'library': 'sklearn'},
-            {"strategy": "GRADIENT_BOOSTING_CLASSIFIER", "library": "sklearn"},
-            {"strategy": "LINEAR_DISCRIMINANT_ANALYSIS", "library": "sklearn"},
-            {"strategy": "QUADRATIC_DISCRIMINANT_ANALYSIS", "library": "sklearn"},
-            # {"strategy": "GAUSSIAN_PROCESS_CLASSIFIER", "library": "sklearn"},
-            {"strategy": "MULTINOMIAL_NAIVE_BAYES", "library": "sklearn"},
-            {"strategy": "GAUSSIAN_NAIVE_BAYES", "library": "sklearn"},
-            {"strategy": "COMPLEMENT_NAIVE_BAYES", "library": "sklearn"},
-            {"strategy": "ADABOOST_CLASSIFIER", "library": "sklearn"},
-            {'strategy': 'LOGISTIC_REGRESSION_CV', 'library': 'sklearn'},
+            {'preprocess': {}, 'model': {'strategy': 'SUPPORT_VECTOR_CLASSIFIER', 'library': 'sklearn', 'probability': True}},
+            {'preprocess': {}, 'model': {"strategy": "RIDGE_CLASSIFIER", 'library': 'sklearn'}},
+            {'preprocess': {}, 'model': {"strategy": "RIDGE_CLASSIFIER_CV", 'library': 'sklearn'}},
+            {'preprocess': {}, 'model': {"strategy": "K_NEIGHBORS_CLASSIFIER", 'library': 'sklearn'}},
+            {'preprocess': {}, 'model': {"strategy": "DECISION_TREE_CLASSIFIER", 'library': 'sklearn'}},
+            {'preprocess': {}, 'model': {"strategy": "GRADIENT_BOOSTING_CLASSIFIER", "library": "sklearn"}},
+            {'preprocess': {}, 'model': {"strategy": "LINEAR_DISCRIMINANT_ANALYSIS", "library": "sklearn"}},
+            {'preprocess': {}, 'model': {"strategy": "QUADRATIC_DISCRIMINANT_ANALYSIS", "library": "sklearn"}},
+            # {'preprocess': {}, 'model': {"strategy": "GAUSSIAN_PROCESS_CLASSIFIER", "library": "sklearn"}},
+            {'preprocess': {}, 'model': {"strategy": "MULTINOMIAL_NAIVE_BAYES", "library": "sklearn"}},
+            {'preprocess': {}, 'model': {"strategy": "GAUSSIAN_NAIVE_BAYES", "library": "sklearn"}},
+            {'preprocess': {}, 'model': {"strategy": "COMPLEMENT_NAIVE_BAYES", "library": "sklearn"}},
+            {'preprocess': {}, 'model': {"strategy": "ADABOOST_CLASSIFIER", "library": "sklearn"}},
+            {'preprocess': {}, 'model': {'strategy': 'LOGISTIC_REGRESSION_CV', 'library': 'sklearn'}},
         ],
         'MULTICLASS': [
             *[
-                {
+                {'preprocess': {}, 'model': {
                     'strategy': 'RANDOM_FOREST',
                     'library': 'sklearn',
                     'n_estimators': n_estimators
-                } for n_estimators in [10, 100]
+                }} for n_estimators in [10, 100]
             ],
-            {'strategy': 'SUPPORT_VECTOR_CLASSIFIER', 'library': 'sklearn'},
-            # {"strategy": "RIDGE_CLASSIFIER", 'library': 'sklearn'},
-            {"strategy": "K_NEIGHBORS_CLASSIFIER", 'library': 'sklearn'},
-            {"strategy": "DECISION_TREE_CLASSIFIER", 'library': 'sklearn'},
-            {"strategy": "GRADIENT_BOOSTING_CLASSIFIER", "library": "sklearn"},
-            {"strategy": "LINEAR_DISCRIMINANT_ANALYSIS", "library": "sklearn"},
-            {"strategy": "QUADRATIC_DISCRIMINANT_ANALYSIS", "library": "sklearn"},
-            # {"strategy": "GAUSSIAN_PROCESS_CLASSIFIER", "library": "sklearn"},
-            {"strategy": "MULTINOMIAL_NAIVE_BAYES", "library": "sklearn"},
-            {"strategy": "GAUSSIAN_NAIVE_BAYES", "library": "sklearn"},
-            {"strategy": "COMPLEMENT_NAIVE_BAYES", "library": "sklearn"},
-            {"strategy": "ADABOOST_CLASSIFIER", "library": "sklearn"},
+            {'preprocess': {}, 'model': {'strategy': 'SUPPORT_VECTOR_CLASSIFIER', 'library': 'sklearn'}},
+            # {'preprocess': {}, 'model': {"strategy": "RIDGE_CLASSIFIER", 'library': 'sklearn'}},
+            {'preprocess': {}, 'model': {"strategy": "K_NEIGHBORS_CLASSIFIER", 'library': 'sklearn'}},
+            {'preprocess': {}, 'model': {"strategy": "DECISION_TREE_CLASSIFIER", 'library': 'sklearn'}},
+            {'preprocess': {}, 'model': {"strategy": "GRADIENT_BOOSTING_CLASSIFIER", "library": "sklearn"}},
+            {'preprocess': {}, 'model': {"strategy": "LINEAR_DISCRIMINANT_ANALYSIS", "library": "sklearn"}},
+            {'preprocess': {}, 'model': {"strategy": "QUADRATIC_DISCRIMINANT_ANALYSIS", "library": "sklearn"}},
+            # {'preprocess': {}, 'model': {"strategy": "GAUSSIAN_PROCESS_CLASSIFIER", "library": "sklearn"}},
+            {'preprocess': {}, 'model': {"strategy": "MULTINOMIAL_NAIVE_BAYES", "library": "sklearn"}},
+            {'preprocess': {}, 'model': {"strategy": "GAUSSIAN_NAIVE_BAYES", "library": "sklearn"}},
+            {'preprocess': {}, 'model': {"strategy": "COMPLEMENT_NAIVE_BAYES", "library": "sklearn"}},
+            {'preprocess': {}, 'model': {"strategy": "ADABOOST_CLASSIFIER", "library": "sklearn"}},
         ],
         'MULTILABEL': [
             *[
-                {
+                {'preprocess': {}, 'model': {
                     'strategy': 'RANDOM_FOREST',
                     'library': 'sklearn',
                     'n_estimators': n_estimators
-                } for n_estimators in [10, 100]
+                }} for n_estimators in [10, 100]
             ],
-            {'strategy': 'SUPPORT_VECTOR_CLASSIFIER', 'library': 'sklearn'},
-            {"strategy": "RIDGE_CLASSIFIER", 'library': 'sklearn'},
-            {"strategy": "K_NEIGHBORS_CLASSIFIER", 'library': 'sklearn'},
-            {"strategy": "DECISION_TREE_CLASSIFIER", 'library': 'sklearn'},
+            {'preprocess': {}, 'model': {'strategy': 'SUPPORT_VECTOR_CLASSIFIER', 'library': 'sklearn'}},
+            {'preprocess': {}, 'model': {"strategy": "RIDGE_CLASSIFIER", 'library': 'sklearn'}},
+            {'preprocess': {}, 'model': {"strategy": "K_NEIGHBORS_CLASSIFIER", 'library': 'sklearn'}},
+            {'preprocess': {}, 'model': {"strategy": "DECISION_TREE_CLASSIFIER", 'library': 'sklearn'}},
         ]
     },
     'REGRESSION': {
         'UNIVARIATE': [
-            {'strategy': 'ORDINARY_LEAST_SQUARES', 'library': 'sklearn'},
-            {"strategy": "RANDOM_FOREST_REGRESSOR", 'library': 'sklearn'},
-            {"strategy": "SUPPORT_VECTOR_REGRESSION", 'library': 'sklearn'},
-            {"strategy": "K_NEIGHBORS_REGRESSOR", 'library': 'sklearn'},
-            {"strategy": "DECISION_TREE_REGRESSOR", 'library': 'sklearn'},
-            {"strategy": "LASSO_REGRESSION", "library": "sklearn"},
-            {"strategy": "LASSO_REGRESSION_LARS", "library": "sklearn"},
-            {"strategy": "ELASTIC_NET", "library": "sklearn"},
-            {"strategy": "ORTHOGONAL_MATCHING", "library": "sklearn"},
-            {"strategy": "ADABOOST_REGRESSOR", "library": "sklearn"},
-            {"strategy": "GRADIENT_BOOSTING_REGRESSOR", "library": "sklearn"},
-            # {"strategy": "GAUSSIAN_PROCESS_REGRESSOR", "library": "sklearn"},
-            {"strategy": "RIDGE_CV", "library": "sklearn"},
+            {'preprocess': {}, 'model': {'strategy': 'ORDINARY_LEAST_SQUARES', 'library': 'sklearn'}},
+            {'preprocess': {}, 'model': {"strategy": "RANDOM_FOREST_REGRESSOR", 'library': 'sklearn'}},
+            {'preprocess': {}, 'model': {"strategy": "SUPPORT_VECTOR_REGRESSION", 'library': 'sklearn'}},
+            {'preprocess': {}, 'model': {"strategy": "K_NEIGHBORS_REGRESSOR", 'library': 'sklearn'}},
+            {'preprocess': {}, 'model': {"strategy": "DECISION_TREE_REGRESSOR", 'library': 'sklearn'}},
+            {'preprocess': {}, 'model': {"strategy": "LASSO_REGRESSION", "library": "sklearn"}},
+            {'preprocess': {}, 'model': {"strategy": "LASSO_REGRESSION_LARS", "library": "sklearn"}},
+            {'preprocess': {}, 'model': {"strategy": "ELASTIC_NET", "library": "sklearn"}},
+            {'preprocess': {}, 'model': {"strategy": "ORTHOGONAL_MATCHING", "library": "sklearn"}},
+            {'preprocess': {}, 'model': {"strategy": "ADABOOST_REGRESSOR", "library": "sklearn"}},
+            {'preprocess': {}, 'model': {"strategy": "GRADIENT_BOOSTING_REGRESSOR", "library": "sklearn"}},
+            # {'preprocess': {}, 'model': {"strategy": "GAUSSIAN_PROCESS_REGRESSOR", "library": "sklearn"}},
+            {'preprocess': {}, 'model': {"strategy": "RIDGE_CV", "library": "sklearn"}},
         ]
     }
 }
@@ -148,10 +148,7 @@ class SearchManager(object):
         except StopIteration:
             return
 
-        return {
-            'preprocess': None,
-            'model': model_specification
-        }
+        return model_specification
 
     def metalearn_result(self, pipeline_specification, scores):
         pass

@@ -158,19 +158,24 @@ problem = problems['appliance']
 pip_spe, train_spe = problem['pipeline_specification'], problem['train_specification']
 search_manager = SearchManager(None, train_spe['problem'])
 new_pip = search_manager.get_pipeline_specification()
-# print(new_pip)
+print(new_pip)
 
 # while new_pip["model"]['strategy'] != "SARIMAX":
-new_pip = search_manager.get_pipeline_specification()
+# new_pip = search_manager.get_pipeline_specification()
 
 model = tworaven_solver.fit_pipeline(new_pip, train_spe)
 
-
+print('starting predict')
 dataframe = pd.read_csv(problem['train_specification']['input']['resource_uri'].replace('file://', ''))
 
 # res = model.forecast
 dataframe = dataframe[['Appliances', 'T1', 'T2', 'date', 'd3mIndex']]
-res = model.forecast(dataframe)
+
+res = model.fitted_values()
+print('fitted values')
+print(res)
+
+res = model.predict(dataframe)
 print(res)
 
 
