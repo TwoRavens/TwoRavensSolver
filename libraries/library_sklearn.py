@@ -130,7 +130,8 @@ class SciKitLearnEstimator(Estimator):
         }
 
     def fitted_values(self):
-        return self.fitted
+        print("FITTED", self.estimator.fitted_values())
+        return pd.DataFrame(self.estimator.fitted_values(), columns=self.problem.targets)
 
     def predict(self, data):
         # special-case for the forecasting problem
