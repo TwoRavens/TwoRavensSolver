@@ -30,6 +30,9 @@ class Estimator(object):
         if solution_dir is not None:
             self.estimator = self._load_estimator(solution_dir)
 
+    def describe(self):
+        raise NotImplementedError(f"{self.library} does not implement describe")
+
     @property
     def problem(self):
         return self.train_specification.problem
@@ -111,7 +114,7 @@ class Estimator(object):
     def get_subclass(library: str):
         if library == 'cross-sectional':
             from tworaven_solver.libraries.library_cross_sectional import CrossSectionalEstimator as SubEstimator
-        elif library == 'scikit-learn':
+        elif library == 'sklearn':
             from tworaven_solver.libraries.library_sklearn import SciKitLearnEstimator as SubEstimator
         elif library == 'prophet':
             from tworaven_solver.libraries.library_prophet import ProphetEstimator as SubEstimator
@@ -136,12 +139,17 @@ class Solution(object):
         self.pipeline_specification = pipeline_specification
         self.train_specification = TrainSpecification(train_specification)
         self.data_specification = data_specification
+        import json
+        print("TRAIN SPEC" + json.dumps(train_specification))
 
         self.preprocessor: Optional[ProblemPreprocessor] = preprocessor
         self.estimator: Optional[Estimator] = estimator
 
         # performanceMetric is relevant in situations where only problem_specification is known
         self.problem['performanceMetric'] = self.train_specification.performance_metric
+
+    def describe(self):
+        return self.estimator.describe()
 
     @property
     def problem(self):
@@ -157,7 +165,7 @@ class Solution(object):
 
         # 1. fit preprocessor
         if self.pipeline_specification.get('preprocess') is not False:
-            self.preprocessor = ProblemPreprocessor(self.problem, self.pipeline_specification['preprocess'])
+            self.preprocessor = ProblemPreprocessor(self.problem, self.pipeline_specification.get('preprocess'))
             self.preprocessor.fit(data)
             data = self.preprocessor.transform(data)
 
@@ -251,14 +259,16 @@ class Solution(object):
             json.dump({
                 'pipeline_specification': self.pipeline_specification,
                 'train_specification': self.train_specification.spec,
-                'data_specification': self.data_specification
+                'data_specification': self.data_specification,
+                'library': self.estimator.library
             }, metadata_file)
 
     @staticmethod
-    def load(solution_dir):
+    def load(solution_dir, metadata=None):
         """
         Load a raven_solver solution from disk.
         :param solution_dir:
+        :param metadata:
         :return: a restored solution
         """
 
@@ -266,10 +276,15 @@ class Solution(object):
         with open(metadata_path, 'r') as metadata_path:
             metadata = json.load(metadata_path)
 
+        preprocessor_path = os.path.join(solution_dir, 'preprocess.joblib')
+        preprocessor = None
+        if os.path.exists(preprocessor_path):
+            preprocessor = joblib.load(preprocessor_path)
+
         return Solution(
-            pipeline_specification=metadata['pipeline_spec'],
+            pipeline_specification=metadata['pipeline_specification'],
             train_specification=metadata['train_specification'],
             data_specification=metadata.get('data_specification'),
 
-            preprocessor=joblib.load(os.path.join(solution_dir, 'preprocessor.joblib')),
+            preprocessor=preprocessor,
             estimator=Estimator.load(solution_dir=solution_dir))

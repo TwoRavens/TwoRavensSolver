@@ -77,22 +77,22 @@ class ProblemSpecification(object):
             *self.get('keywords', [])
         ]
 
-    def time_format(self, name):
-        return self.spec.get('time_format', {}).get(name)
+    def date_format(self, name):
+        return self.spec.get('date_format', {}).get(name)
 
-    def set_time_format(self, name, time_format):
-        self.spec.setdefault('time_format', {})[name] = time_format
+    def set_date_format(self, name, date_format):
+        self.spec.setdefault('date_format', {})[name] = date_format
 
-    def time_offset_start(self, name):
-        return self.spec.get('time_offset_start', {}).get(name)
+    def date_offset_start(self, name):
+        return self.spec.get('date_offset_start', {}).get(name)
 
-    def time_offset_unit(self, name):
-        offset_unit = self.spec.get('time_offset_unit', {}).get(name)
+    def date_offset_unit(self, name):
+        offset_unit = self.spec.get('date_offset_unit', {}).get(name)
         if offset_unit is not None:
             return standardize_date_offset(offset_unit)
 
     @property
-    def resample_time_offset_unit(self):
+    def resample_date_offset_unit(self):
         """time offset of resampled data"""
         granularity = self.spec.get('timeGranularity', {})
         units = granularity.get('units')
@@ -186,7 +186,7 @@ class ProblemSpecification(object):
     @property
     def y(self):
         # model outputs
-        names = [*self.indexes, *self.targets]
+        names = [*self.targets]
         if self.ordering:
             names.append(self.ordering)
 
@@ -195,7 +195,7 @@ class ProblemSpecification(object):
     @property
     def X(self):
         # model inputs use the same columns as the test data
-        return self.test
+        return self.train
 
     @property
     def test(self):

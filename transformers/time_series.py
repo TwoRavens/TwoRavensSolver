@@ -91,13 +91,14 @@ def format_dataframe_date_index(
         # create datetime index by parsing the order column with given format
         order_data = pd.to_datetime(dataframe[order_column], format=date_format)
 
-    if indexes is not None:
+    indexes_data = None
+    if indexes is not None and set(indexes).issubset(dataframe.columns.values):
         indexes_data = dataframe[indexes]
 
     dataframe[order_column] = order_data
     dataframe.set_index(order_column, inplace=True)
 
-    if indexes is not None:
+    if indexes_data is not None:
         dataframe[indexes] = indexes_data
 
     dataframe.sort_index(inplace=True)
@@ -124,22 +125,22 @@ def resample_dataframe_date_index(
         return dataframe
 
     # workaround for https://github.com/pandas-dev/pandas/issues/31697
-    _aliases = {
-        'years': 'Y',
-        'months': 'MS',
-        'weeks': 'W',
-        'days': 'D',
-        'hours': 'H',
-        'minutes': 'T',
-        'seconds': 'S',
-        'microseconds': 'U',
-        'nanoseconds': 'N',
-    }
     if isinstance(resample_date_offset_unit, pd.DateOffset):
-        if len(resample_date_offset_unit.kwds) != 1:
-            raise ValueError(f"date_offset_unit must have one alias: {resample_date_offset_unit.kwds}")
-        for kwd in resample_date_offset_unit.kwds:
-            resample_date_offset_unit = f'{resample_date_offset_unit.n * resample_date_offset_unit.kwds[kwd]}{_aliases[kwd]}'
+        if resample_date_offset_unit.kwds:
+            _aliases = {
+                'years': 'Y',
+                'months': 'MS',
+                'weeks': 'W',
+                'days': 'D',
+                'hours': 'H',
+                'minutes': 'T',
+                'seconds': 'S',
+                'microseconds': 'U',
+                'nanoseconds': 'N',
+            }
+            # raise ValueError(f"date_offset_unit must have one alias: {resample_date_offset_unit.kwds}")
+            for kwd in resample_date_offset_unit.kwds:
+                resample_date_offset_unit = f'{resample_date_offset_unit.n * resample_date_offset_unit.kwds[kwd]}{_aliases[kwd]}'
 
     return dataframe.resample(resample_date_offset_unit).interpolate(method='time')
 
@@ -261,7 +262,7 @@ class TemporalPreprocessor(TransformerMixin, BaseEstimator):
 
                 # fall back to line-space if data is completely irregular
                 if estimated_unit is None:
-                    estimated_unit = pd.DateOffset(seconds=((ordering[-1] - ordering[0]) / len(ordering)).total_seconds())
+                    estimated_unit = pd.DateOffset(seconds=((ordering.iloc[-1] - ordering.iloc[0]) / len(ordering)).total_seconds())
                 self.resample_date_offset_unit = estimated_unit
 
         return self

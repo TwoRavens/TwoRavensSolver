@@ -16,7 +16,7 @@ problems = {
                     "column": "Month",
                     "value": 10
                 },
-                "time_format": {
+                "date_format": {
                     "Month": "%y-%m"
                 },
                 "performanceMetric": {"metric": "rootMeanSquaredError"},  # meanSquareError | meanAbsoluteError
@@ -44,7 +44,7 @@ problems = {
                     "column": "year-month",
                     "value": 10
                 },
-                "time_format": {
+                "date_format": {
                     "year-month": "%Y-%m"
                 },
                 "performanceMetric": {"metric": "meanSquaredError"}
@@ -90,7 +90,6 @@ problems = {
         'train_specification': {
             "problem": {
                 "taskType": "REGRESSION",
-                'forecasting': True,
                 "predictors": ["Games_played", "Number_seasons", 'Player'],
                 "targets": ['Hall_of_Fame'],
                 "categorical": ['Position', 'Player']
@@ -111,7 +110,6 @@ problems = {
         'train_specification': {
             "problem": {
                 "taskType": "REGRESSION",
-                'forecasting': True,
                 "predictors": ["Runs", "Hits", "At_bats"],
                 "targets": ['Triples'],
                 "categorical": ['Position', 'Player']
@@ -132,7 +130,6 @@ problems = {
         'train_specification': {
             "problem": {
                 "taskType": "REGRESSION",
-                'forecasting': True,
                 "predictors": ["Runs", "Hits", "At_bats"],
                 "targets": ['Triples'],
                 "categorical": ['Position', 'Player']

@@ -43,11 +43,10 @@ class BaselineRegressor(RegressorMixin):
         if self.method == 'MEAN':
             self._value = np.nanmean(y, axis=0)
         if self.method == 'NAIVE':
-            self._value = y[-1]
+            self._value = y.iloc[-1, 0]
         if self.method == 'DRIFT':
-            print('y shape', y.shape)
-            self._value = y[-1]
-            self._slope = (y[-1] - y[0]) / self._length
+            self._value = y.iloc[-1, 0]
+            self._slope = (y.iloc[-1, 0] - y.iloc[0, 0]) / self._length
 
     def fitted_values(self):
         fitted = np.repeat(self._value, self._length, axis=0)
@@ -64,9 +63,9 @@ class BaselineRegressor(RegressorMixin):
         prediction.shape += (1,) * (2 - prediction.ndim)
 
         if self.method == 'DRIFT':
-            print(self._slope.shape)
-            print(prediction.shape)
-            print(((1 + np.arange(len(X)))[:, None] * self._slope[None]).shape)
+            # print(self._slope.shape)
+            # print(prediction.shape)
+            # print(((1 + np.arange(len(X)))[:, None] * self._slope[None]).shape)
             prediction += (1 + np.arange(len(X)))[:, None] * self._slope[None]
         return prediction
 
@@ -108,7 +107,7 @@ sklearn_classes = {
 
 
 class SciKitLearnEstimator(Estimator):
-    library = 'scikit-learn'
+    library = 'sklearn'
 
     def describe(self):
         def is_serializable(v):
@@ -130,23 +129,30 @@ class SciKitLearnEstimator(Estimator):
             'all_parameters': get_params(self.estimator)
         }
 
+    def fitted_values(self):
+        return self.fitted
+
     def predict(self, data):
+        # special-case for the forecasting problem
+        if self.problem.is_forecasting:
+            data['X'] = data['y']
+
         return pd.DataFrame(
             data=self.estimator.predict(data['X']),
             columns=self.problem.targets,
-            index=data['index'])
+            index=data.get('index'))
 
     def predict_proba(self, data):
-        if hasattr('predict_proba', self.estimator):
-            return self.estimator.predict_proba(data['X'])
-        else:
+        if not hasattr(self.estimator, 'predict_proba') and hasattr(self.estimator, 'decision_function'):
             return self.estimator.decision_function(data['X'])
+        return self.estimator.predict_proba(data['X'])
 
-    def fit(self, data):
+    def fit(self, data, data_specification=None):
         """
         Fit and return self.
 
         :param data:
+        :param data_specification:
         """
         sklearn_class = sklearn_classes[self.model_specification['strategy']]
         self.estimator = sklearn_class(
@@ -154,18 +160,25 @@ class SciKitLearnEstimator(Estimator):
                 self.model_specification,
                 list(inspect.signature(sklearn_class.__init__).parameters.keys())))
 
-        self.refit(data=data)
+        self.refit(data=data, data_specification=data_specification)
         return self
 
     def refit(self, data=None, data_specification=None):
         if self.data_specification and json.dumps(self.data_specification) == json.dumps(data_specification):
             return
 
+        # special-case for the forecasting problem
+        if self.problem.is_forecasting:
+            data['X'] = data['y']
+
         self.estimator.fit(**filter_args({
             'X': data['X'],
             'y': data['y'],
             'sample_weight': data.get('weight')
         }, list(inspect.signature(self.estimator.fit).parameters.keys())))
+
+        if self.problem.is_forecasting:
+            self.fitted = self.predict(data)
 
         if hasattr(self.estimator, 'classes_'):
             # This is a classification problem, store the label for future use

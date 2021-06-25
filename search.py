@@ -52,10 +52,10 @@ _base_strategies_regression = [
         'keywords': ('REGRESSION', 'UNIVARIATE'),
         'model': {"strategy": "RIDGE_CV", "library": "sklearn"}
     },
-    {
-        'keywords': ('REGRESSION', 'UNIVARIATE'),
-        'model': {"strategy": "DUMMY_REGRESSOR", "library": "sklearn", "strategy": "mean"}
-    },
+    # {
+    #     'keywords': ('REGRESSION', 'UNIVARIATE'),
+    #     'model': {"strategy": "DUMMY_REGRESSOR", "library": "sklearn", "strategy": "mean"}
+    # },
 ]
 _base_strategies_classification = [
     {
@@ -122,10 +122,10 @@ _base_strategies_classification = [
         "keywords": ("CLASSIFICATION", "BINARY"),
         "model": {"strategy": "LOGISTIC_REGRESSION_CV", "library": "sklearn"}
     },
-    {
-        'keywords': ('REGRESSION', 'UNIVARIATE'),
-        'model': {"strategy": "DUMMY_CLASSIFIER", "library": "sklearn", "strategy": "mean"}
-    },
+    # {
+    #     'keywords': ('REGRESSION', 'UNIVARIATE'),
+    #     'model': {"strategy": "DUMMY_CLASSIFIER", "library": "sklearn", "strategy": "mean"}
+    # },
 ]
 
 _strategies_regression_prediction = copy.deepcopy(_base_strategies_regression)
@@ -154,25 +154,25 @@ _strategies_regression_forecasting = [
         }
     } for order in [(4, 1, 2), (1, 1, 1), (4, 1, 2), (2, 1, 0), (0, 1, 2), (0, 1, 1), (0, 2, 2)]],
     # auto-regression
-    *[{
-        'keywords': ('REGRESSION', 'FORECASTING', 'UNIVARIATE'),
-        'preprocess': {'resample': True},
-        'model': {
-            'strategy': 'AR_NN',
-            'library': 'sklearn',
-            'back_steps': step,
-        }
-    } for step in [1, 2]],
-    # neural net regression
-    *[{
-        'keywords': ('REGRESSION', 'FORECASTING', 'MULTIVARIATE'),
-        'preprocess': {'resample': True},
-        'model': {
-            'strategy': 'VAR_NN',
-            'library': 'sklearn',
-            'back_steps': step,
-        }} for step in [1, 2, 3, 4]
-    ],
+    # *[{
+    #     'keywords': ('REGRESSION', 'FORECASTING', 'UNIVARIATE'),
+    #     'preprocess': {'resample': True},
+    #     'model': {
+    #         'strategy': 'AR_NN',
+    #         'library': 'sklearn',
+    #         'back_steps': step,
+    #     }
+    # } for step in [1, 2]],
+    # # neural net regression
+    # *[{
+    #     'keywords': ('REGRESSION', 'FORECASTING', 'MULTIVARIATE'),
+    #     'preprocess': {'resample': True},
+    #     'model': {
+    #         'strategy': 'VAR_NN',
+    #         'library': 'sklearn',
+    #         'back_steps': step,
+    #     }} for step in [1, 2, 3, 4]
+    # ],
     # auto-regression
     {
         'keywords': ('REGRESSION', 'FORECASTING', 'MULTIVARIATE'),
@@ -186,11 +186,11 @@ _strategies_regression_forecasting = [
         'model': {'strategy': 'VAR', 'library': 'statsmodels'}
     },
     # windowed predictive regression
-    *[{
-        'keywords': (*strategy['keywords'], 'FORECASTING'),
-        'preprocess': dict(window=True, **strategy.get('preprocess', {})),
-        'model': strategy['model']
-    } for strategy in _base_strategies_regression]
+    # *[{
+    #     'keywords': (*strategy['keywords'], 'FORECASTING'),
+    #     'preprocess': dict(window=True, **strategy.get('preprocess', {})),
+    #     'model': strategy['model']
+    # } for strategy in _base_strategies_regression]
 ]
 
 _strategies_classification_forecasting = [
@@ -219,6 +219,8 @@ class SearchManager(object):
         self.system_params = system_params
         self.problem = ProblemSpecification(problem_specification)
         keywords = set(self.problem.keywords)
+
+        keywords.add("FORECASTING" if self.problem.is_forecasting else "PREDICTION")
 
         if self.problem.is_forecasting and self.problem.cross_sections:
             self._strategies = [{

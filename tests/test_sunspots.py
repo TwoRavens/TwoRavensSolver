@@ -1,27 +1,35 @@
 from tworaven_solver.tests.shared import problems
 
-import tworaven_solver
 from tworaven_solver.search import SearchManager
 from tworaven_solver.utilities import TrainSpecification
+from tworaven_solver.solution import Solution
 
 
 def run_problem(specs):
 
     train_spec = TrainSpecification(specs['train_specification'])
-    dataframe = train_spec.dataset('input').get_dataframe(usecols=train_spec.problem.train)
+    # dataframe = train_spec.dataset('input').get_dataframe(usecols=train_spec.problem.train)
 
     search_manager = SearchManager(train_spec.problem)
 
-    for pipeline_spec in list(search_manager)[:1]:
+    for pipeline_spec in list(search_manager):
         print('pipeline spec', pipeline_spec)
-        model = tworaven_solver.model.Solution.fit(pipeline_spec, train_spec)
+        model = Solution(pipeline_specification=pipeline_spec, train_specification=train_spec)
+        model.fit()
 
-        res = model.fitted_values()
-        print('fitted values')
-        print(res)
+        if train_spec.problem.is_forecasting:
+            res = model.fitted_values()
+            print('fitted values')
+            print(res)
 
-        res = model.predict(dataframe)
-        print(res)
+            res = model.predict(model.get_future_dataframe(10))
+            print('predicted values')
+            print(res)
+
+        else:
+            res = model.predict(train_spec.dataset('input').get_dataframe())
+            print('predicted values')
+            print(res)
 
 
 # end = model.model.model._index[-1]
@@ -96,4 +104,5 @@ def run_problem(specs):
 # # print(model_tworavens.forecast(3))
 
 if __name__ == "__main__":
-    run_problem(problems['sunspots'])
+    # run_problem(problems['sunspots'])
+    run_problem(problems['baseball'])

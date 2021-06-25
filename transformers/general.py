@@ -103,6 +103,13 @@ class DropConstant(TransformerMixin):
             raise ValueError("unknown type", type(X))
 
 
+class NamedPipeline(Pipeline):
+    def get_feature_names(self, names):
+        for step in self.steps:
+            names = step.get_feature_names(names)
+        return names
+
+
 class InvertibleColumnTransformer(ColumnTransformer):
     """Extension of ColumnTransformer to add inverse_transform"""
 
@@ -124,7 +131,9 @@ class InvertibleColumnTransformer(ColumnTransformer):
                                      "provide get_feature_names."
                                      % (str(name), type(trans).__name__))
             else:
-                col_counts.append(trans.get_feature_names())
+                # TODO: fix this! yikes
+                col_counts.append(len(column))
+                # col_counts.append(trans.get_feature_names())
         return col_counts
 
     def inverse_transform(self, X):
@@ -141,7 +150,7 @@ class InvertibleColumnTransformer(ColumnTransformer):
                                                                self._get_transformer_column_counts()):
             if num_columns == 0:
                 continue
-            inverse = transformer.inverse_transform(X[:, col_offset:col_offset + num_columns])
+            inverse = transformer.inverse_transform(X.iloc[:, col_offset:col_offset + num_columns])
             inverses.append(pd.DataFrame(inverse, columns=colnames))
             col_offset += num_columns
         return pd.concat(inverses, axis=1) if inverses else X
@@ -171,16 +180,16 @@ class ProblemPreprocessor(TransformerMixin):
 
         # alternative pipeline for time series problems
         if self.problem.is_forecasting:
-            self.transformer_y = Pipeline(steps=[
+            self.transformer_y = NamedPipeline(steps=[
                 ('selector', ColumnSelector(columns=self.problem.y)),
                 ('temporal', TemporalPreprocessor(
                     order_column=self.problem.ordering,
                     indexes=self.problem.indexes,
-                    date_format=self.problem.time_format(self.problem.ordering),
-                    date_offset_start=self.problem.time_offset_start(self.problem.ordering),
-                    input_date_offset_unit=self.problem.time_offset_unit(self.problem.ordering),
+                    date_format=self.problem.date_format(self.problem.ordering),
+                    date_offset_start=self.problem.date_offset_start(self.problem.ordering),
+                    input_date_offset_unit=self.problem.date_offset_unit(self.problem.ordering),
                     resample=self.spec.get('resample'),
-                    resample_date_offset_unit=self.problem.resample_time_offset_unit)),
+                    resample_date_offset_unit=self.problem.resample_date_offset_unit)),
                 ('constant', DropConstant()),
                 ('imputer', TemporalImputer()),
                 ('scaler', PandasStandardScaler())
@@ -189,7 +198,7 @@ class ProblemPreprocessor(TransformerMixin):
 
             if self.problem.exogenous:
                 # re-use fitted params from transformer_X to ensure that params are consistent
-                self.transformer_X = Pipeline(steps=[
+                self.transformer_X = NamedPipeline(steps=[
                     ('selector', ColumnSelector(columns=self.problem.X)),
                     ('temporal', TemporalPreprocessor(**self.transformer_y['temporal'].get_params())),
                     ('constant', DropConstant()),
@@ -200,14 +209,14 @@ class ProblemPreprocessor(TransformerMixin):
 
         # standard pipeline for ml problems
         else:
-            self.transformer_X = Pipeline(steps=[
+            self.transformer_X = NamedPipeline(steps=[
                 ('selector', ColumnSelector(columns=self.problem.X)),
-                ('temporal', self._make_predict_transform(X))
+                ('preprocess', self._make_predict_transform(X[self.problem.X]))
             ])
             self.transformer_X.fit(X)
-            self.transformer_y = Pipeline(steps=[
-                ('selector', ColumnSelector(columns=self.problem.y)),
-                ('temporal', self._make_predict_transform(X))
+            self.transformer_y = NamedPipeline(steps=[
+                ('selector', ColumnSelector(columns=self.problem.targets)),
+                ('preprocess', self._make_predict_transform(X[self.problem.targets]))
             ])
             self.transformer_y.fit(X)
 
@@ -226,12 +235,12 @@ class ProblemPreprocessor(TransformerMixin):
         categories = [dataframe[col].value_counts()[:category_limit].index.tolist() for col in categorical_features]
 
         numerical_features = [i for i in dataframe.columns.values if i not in categorical_features]
-        numerical_transformer = Pipeline(steps=[
+        numerical_transformer = NamedPipeline(steps=[
             ('imputer', InvertibleSimpleImputer(strategy='median')),
-            ('scaler', StandardScaler())
+            ('scaler', PandasStandardScaler())
         ])
 
-        categorical_transformer = Pipeline(steps=[
+        categorical_transformer = NamedPipeline(steps=[
             ('imputer', InvertibleSimpleImputer(strategy='constant', fill_value='missing')),
             ('onehot', OneHotEncoder(categories=categories, handle_unknown='ignore', sparse=False))
         ])
@@ -256,17 +265,19 @@ class ProblemPreprocessor(TransformerMixin):
         output = {}
         if self.transformer_X:
             X_out = self.transformer_X.transform(X)
-            if set(self.problem.indexes).issubset(set(X_out.columns.values)):
-                output['indexes'] = X_out[self.problem.indexes].copy()
-                X_out.drop(columns=self.problem.indexes, inplace=True)
-            if self.problem.weighting in X_out:
-                output['weighting'] = X_out.pop(self.problem.weighting)
+            # TODO: X_out is NOT a dataframe
+            if len(X_out) == len(X):
+                output['indexes'] = X[self.problem.indexes].copy()
+            # if self.problem.weighting in X_out:
+            #     output['weighting'] = X_out.pop(self.problem.weighting)
             output['X'] = X_out
         if self.transformer_y:
             y_out = self.transformer_y.transform(X)
-            if set(self.problem.indexes).issubset(set(y_out.columns.values)):
-                output['indexes'] = y_out[self.problem.indexes]
-                y_out.drop(columns=self.problem.indexes, inplace=True)
+            if len(y_out) == len(X):
+                output['indexes'] = X[self.problem.indexes].copy()
+            # if set(self.problem.indexes).issubset(set(y_out.columns.values)):
+            #     output['indexes'] = y_out[self.problem.indexes]
+            #     y_out.drop(columns=self.problem.indexes, inplace=True)
             output['y'] = y_out
 
         return output
@@ -281,7 +292,7 @@ class ProblemPreprocessor(TransformerMixin):
 
         # inverse the transform
         X_in = data.get('X')
-        if self.transformer_X:
+        if X_in is not None and self.transformer_X:
             if 'indexes' in data:
                 data['X'][self.problem.indexes] = data['indexes']
             if 'weighting' in data:
@@ -289,7 +300,7 @@ class ProblemPreprocessor(TransformerMixin):
             X_in = self.transformer_X.inverse_transform(data['X'])
 
         y_in = data.get('y')
-        if self.transformer_y:
+        if y_in is not None and self.transformer_y:
             if 'indexes' in data:
                 data['y'][self.problem.indexes] = data['indexes']
             y_in = self.transformer_y.inverse_transform(data['y'])
@@ -313,7 +324,6 @@ class ProblemPreprocessor(TransformerMixin):
             raise NotImplementedError("format_dataframe_date_index is only applicable for time series problems")
 
         trans: TemporalPreprocessor = self.transformer_y['temporal']
-        print(trans.date_format)
         return format_dataframe_date_index(
             data, trans.order_column,
             indexes=trans.indexes,

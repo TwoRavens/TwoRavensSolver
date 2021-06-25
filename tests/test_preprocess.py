@@ -55,9 +55,9 @@ def test_temporal_formatter_sunspots(plot=False):
     # formatter = TemporalFormatter(
     #     order_column=train_spec.problem.ordering,
     #     resample=True,
-    #     resample_time_offset_unit='30S')
+    #     resample_date_offset_unit='30S')
     # formatter.fit(dataframe)
-    # # print(formatter.time_format)
+    # # print(formatter.date_format)
     # result3 = formatter.transform(dataframe)
     # print(result3)
 

@@ -5,7 +5,7 @@ from statsmodels.tsa.statespace.sarimax import SARIMAXResultsWrapper
 from statsmodels.tsa.vector_ar.var_model import VARResultsWrapper
 
 from tworaven_solver.solution import Estimator
-from utilities import filter_args
+from tworaven_solver.utilities import filter_args
 
 
 class StatsModelsEstimator(Estimator):
