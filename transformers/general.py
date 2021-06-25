@@ -273,7 +273,7 @@ class ProblemPreprocessor(TransformerMixin):
             output['X'] = X_out
         if self.transformer_y:
             y_out = self.transformer_y.transform(X)
-            if len(y_out) == len(X):
+            if len(y_out) == len(X) and set(self.problem.indexes).issubset(X.columns.values):
                 output['indexes'] = X[self.problem.indexes].copy()
             # if set(self.problem.indexes).issubset(set(y_out.columns.values)):
             #     output['indexes'] = y_out[self.problem.indexes]

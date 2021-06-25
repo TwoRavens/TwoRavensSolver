@@ -139,8 +139,6 @@ class Solution(object):
         self.pipeline_specification = pipeline_specification
         self.train_specification = TrainSpecification(train_specification)
         self.data_specification = data_specification
-        import json
-        print("TRAIN SPEC" + json.dumps(train_specification))
 
         self.preprocessor: Optional[ProblemPreprocessor] = preprocessor
         self.estimator: Optional[Estimator] = estimator
